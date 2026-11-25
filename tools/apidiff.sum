@@ -1,5 +1,5 @@
-github.com/birdtable/go-testkit v0.2.0 h1:lUpiv0RHsGsP4kz8eW5q9B6OLOrVCij1Ti05RuYsGgo=
-github.com/birdtable/go-testkit v0.2.0/go.mod h1:4NZgsg8gJU/2MwyYv8MyJO9sh2j+rjGyPmcYfVS0Lz8=
+github.com/birdtable/go-testkit v0.3.1 h1:ochpuiBPj29SIwpVeYqNWOfkxef0nlWREzKcgM3N6DU=
+github.com/birdtable/go-testkit v0.3.1/go.mod h1:4NZgsg8gJU/2MwyYv8MyJO9sh2j+rjGyPmcYfVS0Lz8=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 golang.org/x/exp v0.0.0-20261113113407-e3970619a1a4 h1:lfvjMWyv5q5oJgIhGfBDf7Szvu8POtgSpMy2XbXlEFs=
