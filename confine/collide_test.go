@@ -172,11 +172,13 @@ func TestCollideAnswersAsTheFolderReadsWhatChangesBetweenItsLooks(t *testing.T) 
 		race   func(t *testing.T, dir string, step string, try int)
 	}{
 		{"a removed after its look", []string{"Fold"}, func(t *testing.T, dir, step string, try int) {
+			t.Helper()
 			if step == "a" && try == 1 {
 				remove(t, filepath.Join(dir, "Fold"))
 			}
 		}},
 		{"a probe at fold made after a's look and removed after b's", nil, func(t *testing.T, dir, step string, try int) {
+			t.Helper()
 			switch {
 			case step == "a" && try == 1:
 				make0(t, filepath.Join(dir, "fold"))
@@ -185,6 +187,7 @@ func TestCollideAnswersAsTheFolderReadsWhatChangesBetweenItsLooks(t *testing.T) 
 			}
 		}},
 		{"fold made or removed after every look at a", nil, func(t *testing.T, dir, step string, _ int) {
+			t.Helper()
 			if step != "a" {
 				return
 			}
