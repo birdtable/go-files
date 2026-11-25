@@ -1,3 +1,0 @@
-kind: Removed
-body: The release workflow, .github/workflows/release.yml, which ran only by hand. Each release is still proved by its release checks, run at the release's commit on macOS, Linux and Windows.
-time: 2026-11-25T18:06:42.254673+01:00

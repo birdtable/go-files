@@ -3,6 +3,40 @@
 What each release of go-files changed. Made by changie from the files in .changes/unreleased.
 
 
+## v0.16.2 (2026-11-25)
+
+v0.16.2 fixes one security defect, GHSA-5j6g-3rm2-q3r8: `confine.Collide` could answer that two names are apart when a file made or removed at one of them, another call's probe among them, fell between its looks at the two. The rest of the release is the repository's own CI and tooling. No exported name is added, removed, moved or changed.
+
+Each release is proved by its release checks, `task release`, run at the release's commit on three systems: macOS, Linux and Windows.
+
+### Added
+
+- A test workflow, .github/workflows/test.yml, runs go vet and go test with the race detector on GitHub's hosted Linux, macOS and Windows runners for every pull request and every push to main, prints the passed, failed and skipped counts, and is red on any failure or skip.
+
+### Changed
+
+- The repository's own tools resolve from the public module proxy: each tools/*.mod requires go-testkit v0.3.1, and tools/hatch.mod requires hatch v0.7.0 and go-proc v0.16.0. tools/hatch.mod names a module of its own, github.com/birdtable/go-files/tools, since hatch imports go-files: hatch is built against the published go-files it requires, never against the tree it checks. The test workflow runs every test again, with none skipped, and its tidy check covers each tools/*.mod as well as go.mod.
+- The test workflow also runs lint, the API check and the vulnerability check, each through the repository's own task tooling as the local tiers do, forced so that no stamp under .task/ can skip one, with no wall-clock budget, and each writes its pass or fail line to the job summary. A test fails when git tracks any file under .task/. Pull requests run on Linux and Windows; pushes to main, v* tags and runs by hand add macOS. A newer run for the same ref cancels the older one.
+
+### Removed
+
+- The release workflow, .github/workflows/release.yml, which ran only by hand. Each release is still proved by its release checks, run at the release's commit on macOS, Linux and Windows.
+
+### Security
+
+- GitHub Actions on this repository accepts only actions pinned by a full commit sha, and a workflow's token can read the repository and nothing more. The test workflow holds no secret and keeps no credential after checkout.
+- GHSA-5j6g-3rm2-q3r8: confine.Collide no longer answers that two names are apart when a file made or removed at one of them, another call's probe among them, falls between its looks at the two. Before it answers apart it looks at both names again, and answers apart only where neither changed; where they did, it looks again from the start, and where the folder changes under each of three tries it answers that the names are one. Before, on a volume that folds the two names, such as APFS or NTFS, two Collide calls on one folder at once could be told that names the volume takes for one are two. The answer that the names are one is the safe one, and it can now be wrong the other way: raced by other calls, Collide can answer that two names are one on a volume that folds neither, 2 to 9 calls in 100 with eight at once on one folder. One race is left: a file moved away, back and away again at the first name within one call, each move between two of its looks, can still be answered apart.
+
+### API
+
+Against v0.16.1, no exported name is removed, moved or changed: the API check's breaks from v0.16.1 to v0.16.2 have no lines, alike on darwin, linux and windows. No name is added.
+
+### Size
+
+Non-test Go lines outside internal/ but internal/winapi, v0.16.1 to v0.16.2, as `task size` counts them: confine 4,122 to 4,156, all of it in collide.go; every other package unchanged. 13,508 to 13,542 in all, 34 more: 13,542 of the ceiling's 13,542. treesum: 548, unchanged, of its ceiling's 548.
+
+go-files v0.16.2 requires golang.org/x/sys v0.50.0, golang.org/x/text v0.44.0 and, for its tests alone, github.com/birdtable/go-testkit v0.3.1, as v0.16.1 did. go.mod is unchanged since v0.16.1.
+
 ## v0.16.1 (2026-11-25)
 
 v0.16.1 changes no code a program runs. Its comments, messages and description files are rewritten for readers outside the project, and two description files move to a new folder. No exported name is added, removed, moved or changed, and nothing behaves differently.
