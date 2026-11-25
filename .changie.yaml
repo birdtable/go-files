@@ -8,6 +8,13 @@ versionExt: md
 versionFormat: '## {{.Version}} ({{.Time.Format "2006-01-02"}})'
 kindFormat: '### {{.Kind}}'
 changeFormat: '- {{.Body}}'
+# What ran at a release's commit, written into each version's notes. A release where something
+# else ran, or less, says so in its .changes/<version>.md before it is tagged.
+headerFormat: >-
+  The full release checks, `task release`, ran on macOS at the tagged commit. On Linux, macOS
+  and Windows, the test workflow ran at the tagged commit in CI: go vet, the tests with the race
+  detector, lint, the API check and the vulnerability check. No full release checks ran on Linux
+  or Windows for this release.
 kinds:
   - label: Breaking
   - label: Added
