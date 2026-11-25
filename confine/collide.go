@@ -33,6 +33,10 @@ const opCollide = "collide"
 //
 // It refuses, with an *fs.PathError matching ErrOutside, a name that is not one name in the
 // folder: empty, ., .., or one holding a separator.
+//
+// A caller that may not write, only asks, or must not be swayed to true by other calls' probes
+// calls Folds, which reads the folder's rule and makes nothing. Portable's keys are the filter
+// before either: a folder that folds takes two names for one only where they share a key.
 func Collide(root *os.Root, a, b string) (bool, error) {
 	return collide(root, a, b, func() {}, func(string) {})
 }
