@@ -1,3 +1,0 @@
-kind: Changed
-body: The test workflow also runs lint, the API check and the vulnerability check, each through the repository's own task tooling as the local tiers do, forced so that no stamp under .task/ can skip one, with no wall-clock budget, and each writes its pass or fail line to the job summary. A test fails when git tracks any file under .task/. Pull requests run on Linux and Windows; pushes to main, v* tags and runs by hand add macOS. A newer run for the same ref cancels the older one.
-time: 2026-11-25T21:15:37.647291+01:00

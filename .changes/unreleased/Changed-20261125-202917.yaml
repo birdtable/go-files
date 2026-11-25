@@ -1,3 +1,0 @@
-kind: Changed
-body: 'The repository''s own tools resolve from the public module proxy: each tools/*.mod requires go-testkit v0.3.1, and tools/hatch.mod requires hatch v0.7.0 and go-proc v0.16.0. tools/hatch.mod names a module of its own, github.com/birdtable/go-files/tools, since hatch imports go-files: hatch is built against the published go-files it requires, never against the tree it checks. The test workflow runs every test again, with none skipped, and its tidy check covers each tools/*.mod as well as go.mod.'
-time: 2026-11-25T20:29:17.517214+01:00

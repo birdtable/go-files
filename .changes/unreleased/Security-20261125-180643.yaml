@@ -1,3 +1,0 @@
-kind: Security
-body: GitHub Actions on this repository accepts only actions pinned by a full commit sha, and a workflow's token can read the repository and nothing more. The test workflow holds no secret and keeps no credential after checkout.
-time: 2026-11-25T18:06:43.207834+01:00

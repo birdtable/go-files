@@ -78,7 +78,7 @@ func TestCollideRefusesANoIndexVolumeWhenBothNamesExist(t *testing.T) { //nolint
 	}
 	defer func() { _ = root.Close() }()
 	defer fileid.SeamNoIndex()()
-	_, err = collide(root, "a", "b", func() {})
+	_, err = collide(root, "a", "b", func() {}, func(string) {})
 	wantNoIndex(t, err, "collide (indexSame)")
 }
 
@@ -102,11 +102,11 @@ func TestCollideReadsTheIndexOfALinkItself(t *testing.T) { //nolint:paralleltest
 		t.Fatal(err)
 	}
 	defer func() { _ = root.Close() }()
-	if same, err := collide(root, "j", "f", func() {}); err != nil || same {
+	if same, err := collide(root, "j", "f", func() {}, func(string) {}); err != nil || same {
 		t.Errorf("collide of a junction that leads out and a file: %v, %v, want false and no error", same, err)
 	}
 	defer fileid.SeamNoIndex()()
-	_, err = collide(root, "j", "f", func() {})
+	_, err = collide(root, "j", "f", func() {}, func(string) {})
 	wantNoIndex(t, err, "collide of a junction that leads out (indexSame)")
 }
 
