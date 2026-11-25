@@ -608,6 +608,7 @@ func stubTiers(t *testing.T, cmd string) string {
 // under its own name.
 func TestATierTimesItselfWhateverTheEnvironmentSays(t *testing.T) {
 	t.Parallel()
+	warmPushTools(t)
 	stubbed := stubTiers(t, `"true"`)
 	for _, c := range []struct{ tier, other string }{
 		{"pre-commit", "release"},
@@ -722,11 +723,41 @@ func TestTwoRunsOfATierInOneTreeEachTimeThemselves(t *testing.T) {
 	}
 }
 
+// pushTools is hatch and go-task built once as pre-push's step runs them: with cgo off, as
+// Taskfile.yml's env has every cmd, where taskProgram's task is built with cgo on. A run of
+// pre-push whose step builds either counts that build in its CPU time, and on a cold build cache,
+// with tests building it at once, runs past a hang guard of 10 s.
+var pushTools struct {
+	once sync.Once
+	err  error
+}
+
+// warmPushTools builds pushTools once, as Taskfile.yml's warm does, and fails the test where a
+// build fails.
+func warmPushTools(t *testing.T) {
+	t.Helper()
+	pushTools.once.Do(func() {
+		for _, tool := range []string{"hatch", "task"} {
+			cmd := exec.CommandContext(t.Context(), "go", "tool", "-modfile=tools/"+tool+".mod", "-n", tool) //nolint:gosec // G204: go tool and a name spelled out here; no shell reads them
+			isolate(cmd)
+			cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				pushTools.err = fmt.Errorf("go tool -n %s with cgo off: %w: %s", tool, err, out)
+				return
+			}
+		}
+	})
+	if pushTools.err != nil {
+		t.Fatal(pushTools.err)
+	}
+}
+
 // pushTier runs pre-push, as Taskfile.yml has it, with hatch budget offline, in a folder whose
 // gate/budgets.yaml names this host with the rows given, its members put by the one command cmd.
 // A run of pre-push leaves no start behind: its one step keeps none in a file.
 func pushTier(t *testing.T, rows, cmd string) ([]byte, error) {
 	t.Helper()
+	warmPushTools(t)
 	dir := budgetDir(t, map[string]string{"Taskfile.yml": stubTiers(t, cmd), "gate/budgets.yaml": rows})
 	run := taskCmd(t, "-d", dir, "pre-push")
 	isolate(run)

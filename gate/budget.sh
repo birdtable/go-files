@@ -106,8 +106,10 @@ elif [ "$tier" = release ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
 	Linux-x86_64 | MINGW64_NT-*-x86_64 | MSYS_NT-*-x86_64) row=release-session ;;
 	esac
 fi
+# The members' run of task has --color=false: Task colours what it writes wherever CI is set, and
+# a colour code it leaves open would start the line hatch writes after it.
 if [ "$step" = cpu ] && [ -z "$row" ]; then
-	go tool -modfile=tools/task.mod task "$tier-members" || exit 1
+	go tool -modfile=tools/task.mod task --color=false "$tier-members" || exit 1
 fi
 if [ -z "$row" ]; then
 	at=""
@@ -120,7 +122,7 @@ if [ -n "$load" ]; then set -- "$@" --load-before "$load"; fi
 if [ "$tier" = pre-commit ]; then set -- "$@" --limit 15 --loaded-when before --excused "passed at the load it started at"; fi
 set -- "$@" --advice "a tier over its budget is a speed bug to find; gate/budgets.yaml has the budgets"
 if [ "$step" = cpu ]; then
-	go tool -modfile=tools/hatch.mod hatch budget "$@" --cpu --cpu-row '^(?P<id>[a-z-]+)-cpu-limit: (?P<limit>[0-9]+)$' -- go tool -modfile=tools/task.mod task "$tier-members"
+	go tool -modfile=tools/hatch.mod hatch budget "$@" --cpu --cpu-row '^(?P<id>[a-z-]+)-cpu-limit: (?P<limit>[0-9]+)$' -- go tool -modfile=tools/task.mod task --color=false "$tier-members"
 else
 	go tool -modfile=tools/hatch.mod hatch budget "$@"
 fi
