@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 30
     env:
       GOFLAGS: -mod=mod
-      GOPROXY: https://proxy.golang.org,direct
+      GOPROXY: https://proxy.golang.org
     defaults:
       run:
         shell: bash
