@@ -1,0 +1,3 @@
+kind: Security
+body: confine.Collide no longer answers that two names are apart when a file made or removed at one of them, another call's probe among them, falls between its looks at the two. Before it answers apart it looks at both names again, and answers apart only where neither changed; where they did, it looks again from the start, and where the folder changes under each of three tries it answers that the names are one. Before, on a volume that folds the two names, such as APFS or NTFS, two Collide calls on one folder at once could be told that names the volume takes for one are two.
+time: 2026-11-25T22:31:35.92527+01:00

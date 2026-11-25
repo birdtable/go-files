@@ -46,7 +46,14 @@ func ResolveWalk(path string) (string, error) {
 // CollideMade is Collide with made run once the probe a is made, before b is looked at. It is
 // built into the test binary only.
 func CollideMade(root *os.Root, a, b string, made func()) (bool, error) {
-	return collide(root, a, b, made)
+	return collide(root, a, b, made, func(string) {})
+}
+
+// CollideLooked is Collide with looked run after each look it makes at a or b, told which: "a"
+// and "b" for the first looks, "a again" and "b again" for the second before an answer of apart.
+// It is built into the test binary only.
+func CollideLooked(root *os.Root, a, b string, looked func(step string)) (bool, error) {
+	return collide(root, a, b, func() {}, looked)
 }
 
 // NearestLooked is Nearest with look in place of os.Lstat, so a test walks a path no system holds,
