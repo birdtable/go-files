@@ -1,0 +1,266 @@
+# Runs only by hand, never on a push, a tag or a pull request. The library builds nothing. The
+# release tier runs on the tag's tree on Linux and on Windows, each job held to 45 minutes, and the
+# release is created, with the changie entry as its notes, only when both are green.
+#
+# ref, optional, is a commit to run the tiers at, by its full sha, so a fix is proven before the tag
+# it goes in. With it, fetch and both tier jobs check out that commit, the tier runs with tag as its
+# VERSION, and publish does not run: such a run publishes nothing, and its tag need not exist yet.
+# Without it the tiers run at the tag.
+#
+# Nothing is kept in the Actions cache: setup-go's cache is off in every job. Its post step would
+# save the tier jobs' GOMODCACHE, which may hold modules fetched with a token, and would never hit.
+# The one thing kept is the fetch job's artifact, for one day.
+#
+# The tools' modules (hatch in tools/hatch.mod, and the go-proc it requires) and go-testkit, which
+# go.mod requires for the tests alone, may need a token to fetch, so the modules are fetched by one
+# job and handed to the tier jobs, which hold no token:
+#   - fetch holds a token of the org's read-only GitHub App, narrowed to hatch, go-proc and
+#     go-testkit and Contents: read, made by create-github-app-token from the repository secrets
+#     BIRDTABLE_APP_ID and BIRDTABLE_APP_KEY. The token is in the one step that downloads, in that
+#     step's environment and in no file. That step runs go mod download and go mod tidy -diff for
+#     go.mod and for each tools/*.mod, as the tier's tidy member does, so every module a tier reads
+#     is fetched: tidy reads the tests of the dependencies on every system. go mod tidy -diff writes
+#     nothing to the tree, and the job runs no other code of it. It uploads the module download
+#     cache, and not the VCS cache, so nothing it wrote under the token's name leaves the job. The
+#     artifact may hold modules fetched with the token, so it is kept for a day, and only those who
+#     can read this repository can read it.
+#   - tier-linux and tier-windows download that cache and run with GOPROXY=off and no secret, so the
+#     tree's code, its tests and its tools never see a token. The job's own GITHUB_TOKEN, contents:
+#     read, reaches checkout and setup-go as their default input, and no run step's environment. go
+#     keeps its default -mod=readonly there, so a tier that would change go.mod or a tools/*.mod
+#     fails. Each tier's step "this job holds no token" proves it before the tier runs.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the tag to release, as v0.1.1
+        required: true
+      ref:
+        description: "a commit to run the tiers at, by its full sha; nothing is published"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# bash on each system, Git's on Windows, so the tier's commands find diff and the other tools its
+# scripts call, as they do on Linux.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # A ref that is not a full sha is refused before anything is checked out: a branch's name
+      # would run the tiers at whatever it holds when each job starts, and the three jobs could
+      # read three trees. The inputs reach the script by its environment, never pasted into it.
+      - name: ref is empty or a full sha
+        env:
+          REF: ${{ inputs.ref }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$REF" ] && ! printf '%s' "$REF" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error::ref must be empty or a commit's full sha, and is not, so no tier runs"; exit 1
+          fi
+          if [ -n "$REF" ]; then echo "the tiers run at $REF with VERSION $TAG, and nothing is published"; fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || format('refs/tags/{0}', inputs.tag) }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # app-id takes the App ID the secret holds; client-id, which replaces it, takes the Client ID.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.BIRDTABLE_APP_ID }}
+          private-key: ${{ secrets.BIRDTABLE_APP_KEY }}
+          owner: birdtable
+          repositories: hatch,go-proc,go-testkit
+          permission-contents: read
+      # git reads its URL rewrite from the environment of this step alone: nothing is written to a git
+      # config file, and go's VCS cache is not uploaded.
+      - name: download the modules, the tools' too, and what go mod tidy reads
+        env:
+          TOKEN: ${{ steps.app.outputs.token }}
+          GOPRIVATE: github.com/birdtable/*
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${TOKEN}@github.com/.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/"
+          go mod download
+          go mod tidy -diff
+          for m in tools/*.mod; do
+            go mod download -modfile="$m"
+            go mod tidy -modfile="$m" -diff
+          done
+      - id: cache
+        run: echo "dir=$(go env GOMODCACHE)/cache/download" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gomod
+          path: ${{ steps.cache.outputs.dir }}
+          if-no-files-found: error
+          retention-days: 1
+
+  tier-linux:
+    needs: fetch
+    runs-on: ubuntu-latest
+    # 45 minutes, for the limit a hosted runner sets: it starts with no build cache and has four
+    # cores, so warm builds every tool and test binary before the tier. No member's
+    # timeout and no budget changes: gate/budget.sh applies none on this kind of host.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.ref || format('refs/tags/{0}', inputs.tag) }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # trust's namespace tests run under unshare --user, which the runner's AppArmor refuses to an
+      # account by default.
+      - name: unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gomod
+          path: ${{ runner.temp }}/gomod/cache/download
+      - name: the modules come from the fetch job
+        run: |
+          {
+            echo "GOMODCACHE=${RUNNER_TEMP}/gomod"
+            echo "GOPROXY=off"
+            echo "GOPRIVATE=github.com/birdtable/*"
+          } >> "$GITHUB_ENV"
+      # The proof the tier holds no token: no token variable in its environment, no git credential
+      # header or URL rewrite, no netrc file, and nothing from git's own credential machinery for
+      # github.com. credential fill asks every configured helper (on Windows the system's credential
+      # manager) and any askpass program. GIT_TERMINAL_PROMPT and GCM_INTERACTIVE keep both from
+      # waiting on a person, so a job with no credential gets no answer. credential.interactive is
+      # left on: set false, git asks no askpass program at all. The proof names no repository, so it
+      # holds whether a module is public or not.
+      - name: this job holds no token
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+          GCM_INTERACTIVE: never
+        run: |
+          refuse() { echo "::error::$1, so this job holds a token"; exit 1; }
+          if [ -n "${GH_TOKEN-}${GITHUB_TOKEN-}${TOKEN-}" ]; then refuse "GH_TOKEN, GITHUB_TOKEN or TOKEN is set"; fi
+          if git config --get-regexp '^(http\..*\.extraheader|url\..*\.insteadof)$' > /dev/null; then refuse "git has a credential header or a URL rewrite"; fi
+          got=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null || true)
+          case "$got" in *password=*|*credential=*) refuse "git's credential helpers answer a credential for github.com";; esac
+          if [ -e "$HOME/.netrc" ] || [ -e "$HOME/_netrc" ]; then refuse "a netrc file is in $HOME"; fi
+          echo "no token variable is set, git holds no credential header or URL rewrite, no netrc file is in $HOME, and git's credential helpers answer nothing for github.com"
+      # warm builds each tool, for both CGO_ENABLED values, and the race test binaries, and runs no
+      # test, so no timed member compiles them inside its own timeout.
+      - name: warm
+        run: go tool -modfile=tools/task.mod task warm
+      # VERSION is the tag only in a run at ref, whose checkout is on no tag; without ref it is
+      # empty, and the tier reads the tag the checkout is on, as before.
+      - name: the release tier
+        env:
+          VERSION: ${{ inputs.ref != '' && inputs.tag || '' }}
+        run: go tool -modfile=tools/task.mod task release
+
+  tier-windows:
+    needs: fetch
+    runs-on: windows-latest
+    # 45 minutes, for the same limit as tier-linux's.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.ref || format('refs/tags/{0}', inputs.tag) }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gomod
+          path: ${{ runner.temp }}/gomod/cache/download
+      - name: the modules come from the fetch job
+        run: |
+          {
+            echo "GOMODCACHE=${RUNNER_TEMP}/gomod"
+            echo "GOPROXY=off"
+            echo "GOPRIVATE=github.com/birdtable/*"
+          } >> "$GITHUB_ENV"
+      # The proof the tier holds no token: no token variable in its environment, no git credential
+      # header or URL rewrite, no netrc file, and nothing from git's own credential machinery for
+      # github.com. credential fill asks every configured helper (on Windows the system's credential
+      # manager) and any askpass program. GIT_TERMINAL_PROMPT and GCM_INTERACTIVE keep both from
+      # waiting on a person, so a job with no credential gets no answer. credential.interactive is
+      # left on: set false, git asks no askpass program at all. The proof names no repository, so it
+      # holds whether a module is public or not.
+      - name: this job holds no token
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+          GCM_INTERACTIVE: never
+        run: |
+          refuse() { echo "::error::$1, so this job holds a token"; exit 1; }
+          if [ -n "${GH_TOKEN-}${GITHUB_TOKEN-}${TOKEN-}" ]; then refuse "GH_TOKEN, GITHUB_TOKEN or TOKEN is set"; fi
+          if git config --get-regexp '^(http\..*\.extraheader|url\..*\.insteadof)$' > /dev/null; then refuse "git has a credential header or a URL rewrite"; fi
+          got=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null || true)
+          case "$got" in *password=*|*credential=*) refuse "git's credential helpers answer a credential for github.com";; esac
+          if [ -e "$HOME/.netrc" ] || [ -e "$HOME/_netrc" ]; then refuse "a netrc file is in $HOME"; fi
+          echo "no token variable is set, git holds no credential header or URL rewrite, no netrc file is in $HOME, and git's credential helpers answer nothing for github.com"
+      # What this job's token gives its processes, printed once: internal/testtoken's test reads
+      # the backup and restore privileges before and after Plain, which every package's TestMain
+      # calls, and logs both.
+      - name: the backup and restore privileges of this job's token
+        run: go test -count=1 -v -run '^TestPlainLeavesNeitherPrivilegeEnabled$' ./internal/testtoken/
+      # warm builds each tool, for both CGO_ENABLED values, and the race test binaries, and runs no
+      # test, so no timed member compiles them inside its own timeout.
+      - name: warm
+        run: go tool -modfile=tools/task.mod task warm
+      # VERSION is the tag only in a run at ref, whose checkout is on no tag; without ref it is
+      # empty, and the tier reads the tag the checkout is on, as before.
+      - name: the release tier
+        env:
+          VERSION: ${{ inputs.ref != '' && inputs.tag || '' }}
+        run: go tool -modfile=tools/task.mod task release
+
+  # The only job that writes: it needs both tiers, one red or cancelled and nothing is published.
+  # gh reads the notes file through any link, and its environment holds GH_TOKEN, so a notes
+  # file that is a link, or is reached through a linked folder, would publish what it points at
+  # instead. Nothing is published unless .changes/<tag>.md is a regular file at that path
+  # in the tag's tree, with at least one changie item line. A run at ref publishes nothing: the
+  # job does not run.
+  publish:
+    needs: [tier-linux, tier-windows]
+    if: inputs.ref == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: refs/tags/${{ inputs.tag }}
+      - name: publish the entry as the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          notes=".changes/$TAG.md"
+          refuse() { echo "$notes $1, so nothing is published"; exit 1; }
+          if [ -L "$notes" ]; then refuse "is a link"; fi
+          if [ ! -f "$notes" ]; then refuse "is missing or not a regular file"; fi
+          if [ "$(realpath "$notes")" != "$(pwd -P)/$notes" ]; then refuse "is reached through a linked folder"; fi
+          if ! grep -q '^[*-] ' "$notes"; then refuse "holds no changie item line"; fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file "$notes"

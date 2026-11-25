@@ -1,0 +1,669 @@
+# Copied from a shared golangci-lint preset, base.yml at aa844abc5dc8535bf13e515bef34a9e4fcbe1314 (2026-11-14), with go-files' rows in its slots and overrides.
+#
+# Shared golangci-lint base for Go projects.
+#
+# Written by hand, never generated. Each linter and setting names the rule ids
+# it holds; each of those rules names this file in its check. golangci-lint v2,
+# pinned at 2.15.0. A project's .golangci.yml is generated from this file,
+# unchanged, and the project's own lint/project.yml: the "# slot <name> begin"
+# and "# slot <name> end" lines mark what a project may replace, and the project
+# file maps each slot's name to its text. Lines starting "# per-project:" name
+# paths that only a project knows (its runner, terminal module, adapters, paths
+# helper, layer table); a project fills them in its slots.
+version: "2"
+
+run:
+  tests: true
+
+issues:
+  # go.errors.4, gates.plants.10: no cap, so repeats are not hidden.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # gates.plants.10: a second hit on one line still shows.
+  uniq-by-line: false
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose # go.style.4
+    - contextcheck # go.concurrency.1
+    - depguard # cli.config.7, cli.process.1, cli.look.1, arch.shared.7, arch.ports.11, tests.doubles.2, go.style.5; arch.layers.2/5/7/9, arch.ports.1/2/8 per project
+    - dupl # code.duplication.1 (the within-package tripwire)
+    - errorlint # go.errors.2 (wrapcheck stays off, same rule)
+    - exhaustive # code.idioms.3
+    - exptostd # code.idioms.2
+    - forbidigo # go.errors.3, go.errors.4, go.concurrency.1, cli.config.3, cli.config.5, cli.errors.3, cli.output.2, cli.process.1, arch.ports.1, arch.ports.23, tests.admission.5, tests.isolation.6
+    - gochecknoglobals # arch.ports.12
+    - gochecknoinits # go.layout.2
+    - gocognit # code.size.3
+    - gocritic # code.comments.3
+    - gocyclo # code.idioms.4
+    - godoclint # code.comments.4
+    - godox # register: no //go:linkname in any file; the row is under settings
+    - gomoddirectives # go.layout.3
+    - gosec # cli.process.1, supply.scans.3 (every rule)
+    - iface # arch.ports.10
+    - interfacebloat # go.style.1
+    - modernize # code.idioms.2
+    - noctx # go.concurrency.1, go.style.4
+    - nolintlint # gates.exemptions.1, gates.exemptions.2
+    - paralleltest # go.cycle.2, tests.runners.4: a test calls t.Parallel, or says "// serial: <why>" on a nolint
+    - revive # code.idioms.1, code.naming.1, code.comments.4, code.size.4, go.errors.4, go.concurrency.2, arch.structure.7
+    - sloglint # go.logging.1, go.logging.2
+    - thelper # go.style.5
+    - tparallel # go.cycle.2, tests.runners.4: a test and its subtests agree on t.Parallel
+    - usestdlibvars # code.idioms.2
+  # per-project: sqlclosecheck and rowserrcheck where database/sql is imported (go.style.4).
+
+  settings:
+    depguard:
+      rules:
+        # cli.config.7: flag parsing lives in cmd/ and the command packages only.
+        cli-flags:
+          # slot cli-flags begin
+          files: ["$all", "!**/cmd/**"]
+          # go-files: no package parses flags
+          # slot cli-flags end
+          deny:
+            - pkg: flag
+              desc: "cli.config.7: flags are parsed in cmd/ only"
+            - pkg: github.com/spf13/pflag
+              desc: "cli.config.7: flags are parsed in cmd/ only"
+            - pkg: github.com/spf13/cobra
+              desc: "cli.config.7: flags are parsed in cmd/ only"
+            - pkg: github.com/urfave/cli
+              desc: "cli.config.7: flags are parsed in cmd/ only"
+        # cli.process.1: only the runner starts programs.
+        owner-exec:
+          # slot owner-exec begin
+          files: ["$all"]
+          # go-files: has no runner; a test that starts a program says so where it imports os/exec
+          # slot owner-exec end
+          deny:
+            - pkg: os/exec
+              desc: "cli.process.1: start programs through the runner"
+        # cli.look.1, arch.shared.7: terminal libraries only in the shared UI module.
+        owner-ui:
+          # slot owner-ui begin
+          files: ["$all"]
+          # per-project: "!**/<shared UI module>/**"
+          # slot owner-ui end
+          deny:
+            - pkg: golang.org/x/term
+              desc: "arch.shared.7: terminal detection belongs to the shared UI module"
+            - pkg: github.com/mattn/go-isatty
+              desc: "arch.shared.7: terminal detection belongs to the shared UI module"
+            - pkg: github.com/charmbracelet
+              desc: "cli.look.1: terminal styling belongs to the shared UI module"
+            - pkg: github.com/fatih/color
+              desc: "cli.look.1: terminal styling belongs to the shared UI module"
+            - pkg: github.com/muesli/termenv
+              desc: "cli.look.1: terminal styling belongs to the shared UI module"
+        # arch.ports.23: operating-system packages only in the host layer.
+        os-host:
+          # slot os-host begin
+          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/testtoken/**"]
+          # go-files: each package is its own host layer; the layer rows below name what each may import
+          # slot os-host end
+          deny:
+            - pkg: golang.org/x/sys
+              desc: "arch.ports.23: an operating-system package belongs to the host layer, so the calls of each system stay in its own files"
+            - pkg: github.com/gofrs/flock
+              desc: "arch.ports.23: an operating-system package belongs to the host layer"
+            - pkg: github.com/shirou/gopsutil
+              desc: "arch.ports.23: an operating-system package belongs to the host layer"
+        # arch.ports.11: wire by hand in the entry point.
+        no-di:
+          files: ["$all"]
+          deny:
+            - pkg: go.uber.org/fx
+              desc: "arch.ports.11: no dependency-injection framework"
+            - pkg: go.uber.org/dig
+              desc: "arch.ports.11: no dependency-injection framework"
+            - pkg: github.com/google/wire
+              desc: "arch.ports.11: no dependency-injection framework"
+            - pkg: github.com/samber/do
+              desc: "arch.ports.11: no dependency-injection framework"
+        # go.style.5: tests use the standard testing package only; no assertion
+        # library.
+        no-assert:
+          files: ["$test"]
+          deny:
+            - pkg: github.com/stretchr/testify
+              desc: "go.style.5: a test uses the standard testing package only"
+            - pkg: gotest.tools
+              desc: "go.style.5: a test uses the standard testing package only"
+            - pkg: github.com/onsi/gomega
+              desc: "go.style.5: a test uses the standard testing package only"
+            - pkg: github.com/onsi/ginkgo
+              desc: "go.style.5: a test uses the standard testing package only"
+            - pkg: github.com/matryer/is
+              desc: "go.style.5: a test uses the standard testing package only"
+            - pkg: github.com/frankban/quicktest
+              desc: "go.style.5: a test uses the standard testing package only"
+        # tests.doubles.2: no mock library; a fake is written by hand.
+        no-mocks:
+          files: ["$all"]
+          deny:
+            - pkg: github.com/golang/mock
+              desc: "tests.doubles.2: no mock library"
+            - pkg: go.uber.org/mock
+              desc: "tests.doubles.2: no mock library"
+            - pkg: github.com/stretchr/testify/mock
+              desc: "tests.doubles.2: no mock library"
+            - pkg: github.com/vektra/mockery
+              desc: "tests.doubles.2: no mock library"
+        # per-project (go.logging.1, daemon kind only):
+        # no-std-log:
+        #   files: ["$all"]
+        #   deny:
+        #     - pkg: log
+        #       desc: "go.logging.1: log through the shared slog logger"
+        # per-project (arch.layers.2, arch.layers.5, arch.layers.7, arch.layers.9,
+        # arch.ports.1, arch.ports.2, arch.ports.8): the layer and port rows are
+        # rendered from the project's layer table, never written here.
+        # slot layer-rows begin
+        # go-files's layer table: what each package may import, one row for
+        # its code, one for its Windows files where they take internal/winapi, and one for its
+        # tests. A strict list allows the standard library and what it names, and refuses all else;
+        # each package's doc comment says what it is for and what it imports. A package's tests may
+        # also import the package, internal/testtoken and github.com/birdtable/go-testkit, which no
+        # package's code imports. internal/winapi builds for Windows alone, so only a
+        # _windows.go file of write, confine, lock or appdirs may import it; internal/fileid is the one file-index test of the six packages that compare
+        # by file ID. The last row is for a package no row names, a folder below one of
+        # these among them: it may import the standard library alone. `task lint` plants a forbidden
+        # import for each row in a scratch module, and is red when the row does not refuse it.
+        # trust takes confine, whose MkdirPrivate makes the folders trust.MkdirPrivate judges;
+        # confine takes no trust, so the two make no cycle.
+        layer-trust:
+          files: ["**/trust/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+        layer-confine:
+          files: ["**/confine/*.go", "!$test", "!**/confine/*_windows.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, golang.org/x/text/unicode/norm$, github.com/birdtable/go-files/internal/fileid$]
+        layer-confine-windows:
+          files: ["**/confine/*_windows.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, golang.org/x/text/unicode/norm$, github.com/birdtable/go-files/internal/winapi$, github.com/birdtable/go-files/internal/fileid$]
+        layer-write:
+          files: ["**/write/*.go", "!$test", "!**/write/*_windows.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+        layer-write-windows:
+          files: ["**/write/*_windows.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/winapi$, github.com/birdtable/go-files/internal/fileid$]
+        layer-write-tests:
+          files: ["**/write/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        layer-confine-tests:
+          files: ["**/confine/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, golang.org/x/text/unicode/norm$, golang.org/x/text/cases$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/filestest$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/internal/fileid$]
+        layer-treesum:
+          files: ["**/treesum/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+        layer-treesum-tests:
+          files: ["**/treesum/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/treesum$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/internal/fileid$]
+        # nowait imports the standard library alone, and its tests nowait, internal/testtoken and testkit
+        # besides.
+        layer-nowait:
+          files: ["**/nowait/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd]
+        layer-nowait-tests:
+          files: ["**/nowait/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/nowait$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        # splice imports the standard library alone, so a wasip1 build with the standard library only
+        # can take it, and its tests splice, internal/testtoken and testkit besides.
+        layer-splice:
+          files: ["**/splice/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd]
+        layer-splice-tests:
+          files: ["**/splice/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/splice$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        layer-lock:
+          files: ["**/lock/*.go", "!$test", "!**/lock/*_windows.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/internal/fileid$]
+        layer-lock-windows:
+          files: ["**/lock/*_windows.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/internal/winapi$, github.com/birdtable/go-files/internal/fileid$]
+        layer-lock-tests:
+          files: ["**/lock/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/lock$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/internal/fileid$]
+        layer-appdirs:
+          files: ["**/appdirs/*.go", "!$test", "!**/appdirs/*_windows.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+        # appdirs.Temp makes its folder with the owner-only list through winapi.
+        layer-appdirs-windows:
+          files: ["**/appdirs/*_windows.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/winapi$, github.com/birdtable/go-files/internal/fileid$]
+        layer-appdirs-tests:
+          files: ["**/appdirs/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+        layer-trust-tests:
+          files: ["**/trust/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/internal/fileid$]
+        # trusttest, the test helpers of a program that judges with trust, takes
+        # trust and golang.org/x/sys, as appdirs does; its tests take it, internal/testtoken and testkit besides.
+        layer-trusttest:
+          files: ["**/trust/trusttest/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/trust$]
+        layer-trusttest-tests:
+          files: ["**/trust/trusttest/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/trust/trusttest$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        # filestest, the test helpers that write a file, write a program and take a
+        # private folder, takes write, appdirs, confine and trust; its tests take it, trusttest,
+        # internal/testtoken and github.com/birdtable/go-testkit besides.
+        layer-filestest:
+          files: ["**/filestest/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$]
+        layer-filestest-tests:
+          files: ["**/filestest/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/filestest$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/trust/trusttest$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        # internal/fileid and the repo's task program import the standard library alone.
+        layer-internal:
+          files: ["**/internal/fileid/*.go", "**/internal/cmd/measure/*.go"]
+          list-mode: strict
+          allow: [$gostd]
+        layer-winapi:
+          files: ["**/internal/winapi/*.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys]
+        # winapi's tests start through testkit and internal/testtoken, as every package's do.
+        layer-winapi-tests:
+          files: ["**/internal/winapi/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        # internal/testtoken is the tests' alone, and takes golang.org/x/sys for the
+        # token calls the standard library does not carry.
+        layer-testtoken:
+          files: ["**/internal/testtoken/*.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys]
+        # The second consumer takes the six packages as any program does, and no
+        # library beside them; its tests take filestest besides.
+        layer-second-consumer:
+          files: ["**/internal/secondconsumer/*.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/lock$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/treesum$, github.com/birdtable/go-files/filestest$]
+        layer-no-row:
+          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/testtoken/*.go", "!**/internal/secondconsumer/*.go"]
+          list-mode: strict
+          allow: [$gostd]
+        # slot layer-rows end
+        # The library register's bans for go-files, each kept for the
+        # security or correctness reason its desc states: a
+        # library is denied only for what it does wrong, never for a preference.
+        register-bans:
+          files: ["$all"]
+          deny:
+            - pkg: github.com/moby/sys/user
+              desc: "register (file-owner-and-mode), correctness: it parses a garbled gid as 0, so a group check passes wrongly"
+            - pkg: github.com/cyphar/filepath-securejoin
+              desc: "register (confine-to-folder), security: SecureJoin returns a path resolved before the open, so a link swapped in after it is followed; its safe API is Linux alone"
+            - pkg: github.com/containerd/continuity
+              desc: "register (confine-to-folder), security: fs.RootPath returns a path resolved before the open, so a link swapped in after it is followed"
+            - pkg: github.com/nightlyone/lockfile
+              desc: "register (path-lock), correctness: a pid file, not a kernel lock, so a reused pid holds it"
+            - pkg: github.com/alexflint/go-filemutex
+              desc: "register (path-lock), security: it opens the lock's name following a link and locks it by hand, past lock's refusals"
+            - pkg: github.com/juju/fslock
+              desc: "register (path-lock), security: it opens the lock's name following a link and locks it by hand, past lock's refusals, and reaches LockFileEx by a proc and a raw call"
+            - pkg: github.com/google/renameio
+              desc: "register (atomic-write), correctness: it does not flush the folder, so a replace is lost on a power cut, and it exports nothing on Windows"
+            - pkg: github.com/moby/sys/atomicwriter
+              desc: "register (atomic-write), correctness: it does not flush the folder, so a replace is lost on a power cut, and it writes by path, never beneath a held folder"
+            - pkg: github.com/natefinch/atomic
+              desc: "register (atomic-write), correctness: it does not flush the folder, so a replace is lost on a power cut, and it writes by path, never beneath a held folder"
+            - pkg: github.com/dchest/safefile
+              desc: "register (atomic-write), correctness: it does not flush the folder, so a replace is lost on a power cut, and it writes by path, never beneath a held folder"
+            - pkg: tailscale.com/atomicfile
+              desc: "register (atomic-write), correctness: it does not flush the folder, so a replace is lost on a power cut, and it writes by path, never beneath a held folder"
+        # The register (path-lock): gofrs/flock left go-files, as lock
+        # locks the file it checked itself, so the row holds in every file. A lock
+        # taken through it would open the name again and skip lock's refusals.
+        register-flock:
+          files: ["$all"]
+          deny:
+            - pkg: github.com/gofrs/flock
+              desc: "register (path-lock), the guest link test: write and confine link the standard library and x/sys alone; security: a lock taken through it opens the name again, and skips lock's refusals"
+        # arch.shared.8: the ban on each shared primitive's import outside its
+        # owner is rendered from the project's shared registry, never written here.
+        # slot shared-imports begin
+        # slot shared-imports end
+
+    dupl:
+      threshold: 60 # code.duplication.1
+
+    errcheck:
+      # go.errors.1, go.errors.3 (tests excluded below)
+      check-type-assertions: true
+      check-blank: true
+
+    exhaustive:
+      default-signifies-exhaustive: true # code.idioms.3 (tests excluded below)
+
+    forbidigo:
+      analyze-types: true # go.errors.3, go.concurrency.1, cli.config.3, cli.output.2, tests.isolation.6
+      forbid:
+        - pattern: ^panic$
+          msg: "go.errors.3: panic is for programmer errors; outside main and tests it needs an allow-list entry"
+        - pattern: ^os\.Exit$
+          msg: "go.errors.4: only main exits"
+        - pattern: ^log\.(Fatal|Fatalf|Fatalln)$
+          msg: "go.errors.4: only main exits"
+        - pattern: ^context\.(Background|TODO)$
+          msg: "go.concurrency.1: take the context from the caller"
+        - pattern: ^os\.(Getenv|LookupEnv|Environ)$
+          msg: "cli.config.3: read the environment in the config package"
+        - pattern: ^os\.(UserConfigDir|UserCacheDir|UserHomeDir)$
+          msg: "cli.config.5: folders come from the paths helper"
+        - pattern: ^fmt\.(Print|Printf|Println)$
+          msg: "cli.errors.3: write through the injected writer or the terminal module"
+        - pattern: ^os\.(Stdout|Stderr)$
+          msg: "cli.errors.3: write through the injected writer or the terminal module"
+        - pattern: ^json\.(NewEncoder|Marshal|MarshalIndent)$
+          pkg: ^encoding/json$
+          msg: "cli.output.2: JSON output is written by the root command only"
+        - pattern: ^os\.StartProcess$
+          msg: "cli.process.1: start programs through the runner"
+        - pattern: ^syscall\.(ForkExec|Exec|StartProcess)$
+          msg: "cli.process.1: start programs through the runner"
+        - pattern: ^runtime\.(GOOS|GOARCH)$
+          msg: "arch.ports.1, arch.ports.23: platform checks belong in the host layer"
+        - pattern: ^testing\.(T|B|F)\.(Skip|Skipf|SkipNow)$
+          msg: "tests.admission.5: a skip needs an allow-list entry and a reason"
+        - pattern: ^time\.Sleep$
+          msg: "tests.isolation.6: no sleep in a test; wait on a signal"
+        # arch.shared.8: the ban on each shared primitive's call outside its owner
+        # is rendered from the project's shared registry, never written here.
+        # slot shared-calls begin
+        # slot shared-calls end
+        # slot forbid-extra begin
+        # The register (confine-to-folder): raw openat2 and renameat2
+        # are confine's own, in its Linux files; an exclusion below scopes it.
+        - pattern: ^unix\.(Openat2|Renameat2)$
+          msg: "register (confine-to-folder): unix.Openat2 and unix.Renameat2 are confine's own, in its Linux files; security: a hand call elsewhere can leave out confine's resolve flags and follow a link out of the folder"
+        # The register (path-lock): a path is held by lock, which
+        # locks the file it opened and checked. The kernel's lock calls
+        # are lock's and write's Append's alone (an exclusion below names their
+        # four files).
+        - pattern: ^(syscall|unix)\.Flock$
+          msg: "register (path-lock): the kernel's lock calls are lock's, on the file it checked, in its two system files, and Append's, in write's; security: a lock taken by hand elsewhere skips lock's refusals, and follows a link at the lock's name"
+        - pattern: ^windows\.(Lock|Unlock)FileEx$
+          msg: "register (path-lock): the kernel's lock calls are lock's, on the file it checked, in its two system files, and Append's, in write's; security: a lock taken by hand elsewhere skips lock's refusals, and follows a link at the lock's name"
+        # The register: no file makes a raw system call: Syscall,
+        # RawSyscall, each numbered and N form, their NoError forms, and
+        # AllThreadsSyscall and AllThreadsSyscall6, of syscall or of x/sys/unix.
+        # A raw call by number would get past the rows above (openat2, renameat2,
+        # flock); the kernel is read through x/sys's named calls.
+        - pattern: ^(syscall|unix)\.(AllThreads|Raw)?Syscall(6|9|12|15|18|N)?(NoError)?$
+          msg: "register: no raw system call in any file (Syscall, RawSyscall, their numbered, N and NoError forms, AllThreadsSyscall); security: a call by number gets past the confine-to-folder and path-lock rows"
+        # The register: no file acquires a DLL's proc, of syscall or
+        # of x/sys/windows: a DLL loaded (NewLazyDLL, NewLazySystemDLL, LoadDLL,
+        # MustLoadDLL, LoadLibrary, LoadLibraryEx), a proc found in one (NewProc,
+        # FindProc, MustFindProc, and x/sys's by-ordinal forms), or its address
+        # read (GetProcAddress, GetProcAddressByOrdinal). A proc reached by name,
+        # as NewLazySystemDLL("kernel32.dll").NewProc("LockFileEx").Call(...),
+        # would get past the path-lock row, which names x/sys's wrapper. go-files
+        # excepts no proc, so no exclusion scopes these. An address alone has no
+        # caller while the raw-call row above holds; it is refused as well, so
+        # these rows read as go-socket's.
+        - pattern: ^(syscall|windows)\.(NewLazyDLL|NewLazySystemDLL|LoadDLL|MustLoadDLL|LoadLibrary|LoadLibraryEx|GetProcAddress|GetProcAddressByOrdinal)$
+          msg: "register: no DLL's proc is acquired in any file (NewLazyDLL, NewLazySystemDLL, LoadDLL, MustLoadDLL, LoadLibrary, NewProc, FindProc, GetProcAddress and kin); security: a proc reached by name gets past the path-lock row"
+        - pattern: ^(syscall|windows)\.(LazyDLL\.NewProc|DLL\.(Must)?FindProc(ByOrdinal)?)$
+          msg: "register: no DLL's proc is acquired in any file (NewLazyDLL, NewLazySystemDLL, LoadDLL, MustLoadDLL, LoadLibrary, NewProc, FindProc, GetProcAddress and kin); security: a proc reached by name gets past the path-lock row"
+        # LazyDLL's Name and System are exported, so a literal &windows.LazyDLL{...}
+        # loads a DLL with no call above, and its NewProc, promoted through an
+        # embedding or called through an interface, goes by another name. The
+        # types themselves are refused at each mention.
+        - pattern: ^(syscall|windows)\.(Lazy)?(DLL|Proc)$
+          msg: "register: no DLL's proc is acquired in any file (NewLazyDLL, NewLazySystemDLL, LoadDLL, MustLoadDLL, LoadLibrary, NewProc, FindProc, GetProcAddress and kin); security: a proc reached by name gets past the path-lock row"
+        # slot forbid-extra end
+        # per-project (cli.errors.2, cli.look.4, cli.look.5, cli.output.5): the
+        # shared UI module's literals and constructors, for example
+        #   ^ui\.(Ending|Refusal)$, ^lipgloss\.Style\.(Padding|Margin|Width)$,
+        #   flag definitions of the module's flag names.
+        # per-project (arch.ports.6, arch.shared.8, cli.config.2): sibling names,
+        #   shared exports and config decodes named in rule data.
+
+    gocognit:
+      min-complexity: 20 # code.size.3 (tests excluded below)
+
+    gocritic:
+      # code.comments.3: commentedOutCode only.
+      disable-all: true
+      enabled-checks:
+        - commentedOutCode
+
+    gocyclo:
+      min-complexity: 30 # code.idioms.4
+
+    # The register: no file holds a //go:linkname directive. It
+    # binds a name to a libc trampoline or a runtime symbol past x/sys's named
+    # calls, as surely as the raw calls the register bans, and a linkname needs
+    # an import of unsafe, which no linter can tell from a use of its own, so
+    # the directive itself is the row. godox reports a comment line that starts
+    # with the keyword, in every file, tests included, with no exclusion; its
+    # report reads "Line contains go:linkname". This list replaces godox's
+    # defaults (TODO, BUG, FIXME), which go-files does not ban.
+    godox:
+      keywords: ["go:linkname"]
+    gomoddirectives:
+      # go.layout.3: no replace lines at all.
+      replace-local: false
+      replace-allow-list: []
+
+    gosec:
+      # supply.scans.3: every rule runs, G201, G202, G204 and G404 among them, and no
+      # includes or excludes list narrows it; an exclusion below names its rule
+      # ids, its paths and its reason (internal/contexts_test.go holds the four).
+      config:
+        global:
+          # cli.process.1, gates.exemptions.1: a #nosec comment silences
+          # nothing; a suppression is a nolint with its reason, counted.
+          nosec: true
+
+    govet:
+      enable:
+        - waitgroup # go.concurrency.2 (on top of the default analyzers, code.format.2)
+
+    iface:
+      enable: # arch.ports.10
+        - identical
+        - unused
+        - opaque
+
+    interfacebloat:
+      max: 10 # go.style.1
+
+    nolintlint:
+      # gates.exemptions.1, gates.exemptions.2
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+
+    paralleltest:
+      # go.cycle.2, tests.runners.4: a test that runs alone is written
+      # //nolint:paralleltest // serial: <the process state it needs>; the
+      # project's suppression list holds the text, since nolintlint cannot.
+      ignore-missing: false
+      ignore-missing-subtests: false
+
+    revive:
+      rules:
+        - name: early-return # code.idioms.1
+        - name: indent-error-flow # code.idioms.1
+        - name: exported # code.naming.1 (stutter check on), code.comments.4
+        - name: var-naming # code.naming.1
+        - name: package-naming # arch.structure.7
+          arguments:
+            - check-extra-bad-name: true
+              user-defined-bad-names: [helpers, types, models, interfaces, base, other, misc]
+        - name: argument-limit # code.size.4
+          arguments: [6]
+        - name: deep-exit # go.errors.4
+        - name: datarace # go.concurrency.2
+        - name: waitgroup-by-value # go.concurrency.2
+        - name: forbidden-call-in-wg-go # go.concurrency.2
+
+    sloglint:
+      # go.logging.1, go.logging.2
+      no-global: all
+      static-msg: true
+      kv-only: true
+
+    thelper:
+      # go.style.5: a helper calls t.Helper first. Where the testing value sits
+      # in the parameters and what it is named are not the rule.
+      test: {begin: true, first: false, name: false}
+      benchmark: {begin: true, first: false, name: false}
+      tb: {begin: true, first: false, name: false}
+      fuzz: {begin: true, first: false, name: false}
+
+    staticcheck:
+      # code.format.2: all groups, the non-default ST checks off except
+      # ST1003, which code.naming.1 asks for. ST1005 stays on (go.errors.5 is
+      # not ruled yet; a project that keeps sentence-style errors excludes it).
+      checks:
+        - all
+        - -ST1000
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+
+  exclusions:
+    # code.comments.4: no exclusion presets, so the comments preset stays off.
+    presets: []
+    # cli.process.1, gates.exemptions.1: a generated-file header silences no
+    # linter; golangci-lint v2 reads one loosely by default and drops the whole
+    # file. A suppression is a nolint with its reason, counted.
+    generated: disable
+    # Keep this list last in the file: a project's own exclusion rules are
+    # list items appended below its overrides line.
+    rules:
+      # slot exclusions-generated begin
+      # slot exclusions-generated end
+      # go.errors.1, code.idioms.3, code.size.3, code.duplication.1: non-test
+      # code only; a test's table of cases repeats by design.
+      - path: _test\.go$
+        linters: [dupl, errcheck, exhaustive, gocognit]
+      # supply.scans.3: a test reads and writes its own temp folders and testdata,
+      # builds its inputs from planted values, and plants credential-shaped strings
+      # that the secret scan reads with every file; G104 is errcheck's, as above.
+      - path: _test\.go$
+        linters: [gosec]
+        text: "G(101|104|115|122|301|302|304|306|703):"
+      # go.errors.3, go.errors.4: main and tests may panic and exit.
+      - path: (^|/)cmd/|_test\.go$
+        linters: [forbidigo]
+        text: "go\\.errors\\.[34]:"
+      # go.concurrency.1: a root context is made in main and in tests.
+      - path: (^|/)cmd/[^/]+/main\.go$|_test\.go$
+        linters: [forbidigo]
+        text: "go\\.concurrency\\.1:"
+      # cli.config.3: the config package and main read the environment; only
+      # the config package's own files, not a package below it.
+      # per-project: add the terminal module path.
+      - path: (^|/)cmd/[^/]+/main\.go$|(^|/)internal/config/[^/]+\.go$
+        linters: [forbidigo]
+        text: "cli\\.config\\.3:"
+      # cli.errors.3: main wires the process streams into run.
+      # per-project: add the terminal module path.
+      - path: (^|/)cmd/[^/]+/main\.go$
+        linters: [forbidigo]
+        text: "cli\\.errors\\.3:"
+      # cli.output.2: only the command path is checked: cmd/ and the command
+      # tree under internal/cli/.
+      # per-project: add the root command file.
+      - path-except: (^|/)cmd/|(^|/)internal/cli/
+        linters: [forbidigo]
+        text: "cli\\.output\\.2:"
+      # tests.admission.5, tests.isolation.6: test files only.
+      - path-except: _test\.go$
+        linters: [forbidigo]
+        text: "tests\\.(admission\\.5|isolation\\.6):"
+# slot overrides begin
+      # go-files: the moved tests that set the process umask or start a process
+      # between two steps run alone, as they did before the move.
+      - path: (^|/)(lock/(in|lock)_unix_test\.go|confine/links_unix_test\.go)$
+        linters: [paralleltest]
+      - path: (^|/)lock/in_unix_test\.go$
+        linters: [tparallel]
+      # The register's raw openat2 and renameat2 row holds outside
+      # confine's own Linux files and their tests, at the module's root alone:
+      # a nested confine/ folder is not excepted.
+      - path: ^confine/[^/]+_linux(_test)?\.go$
+        linters: [forbidigo]
+        text: "register \\(confine-to-folder\\):"
+      # trust reads
+      # /proc/self/mountinfo by one openat2 from its held /proc root, with
+      # RESOLVE_NO_XDEV and RESOLVE_NO_MAGICLINKS, so no file mounted or linked
+      # there is read as the kernel's. By file, at the module's root, and by
+      # the call's own source line: openat2 anywhere else in trust is red.
+      - path: ^trust/mount_linux\.go$
+        linters: [forbidigo]
+        text: "register \\(confine-to-folder\\):"
+        source: 'unix\.Openat2\(root, "self/mountinfo", &how\)'
+      # The path-lock row holds
+      # outside lock's and write's two system files each. lock locks the file
+      # it opened and checked. Append holds its log on its own
+      # descriptor, because write may import only the standard library and
+      # golang.org/x/sys (the link test) and so cannot call lock. The exception
+      # is by file, at the module's root: a fifth file that takes
+      # a lock, or a nested lock/ or write/ folder, is red.
+      - path: ^(write/write_(unix|windows)|lock/(flock|lock_windows))\.go$
+        linters: [forbidigo]
+        text: "register \\(path-lock\\):"
+      # The no-raw-call row holds outside the one darwin
+      # file that reads a name's access list by getattrlist(2), which x/sys
+      # does not wrap (golang/go#83151). The file makes one call,
+      # unix.Syscall6(unix.SYS_GETATTRLIST, ...) with FSOPT_NOFOLLOW; when x/sys
+      # gains Getattrlist, the call and this exclusion go. By file, at the
+      # module's root: a second file, or a nested trust/ folder, is red. By
+      # line, the call's own: a raw call on any other line of the file is red,
+      # and trust/register_test.go's go/ast pin refuses a second on any line,
+      # the call made without FSOPT_NOFOLLOW, and syscall or unix by another
+      # name, each by a plant.
+      - path: ^trust/maclist_darwin\.go$
+        linters: [forbidigo]
+        text: "register: no raw system call"
+        source: '^\t_, _, e := unix\.Syscall6\(unix\.SYS_GETATTRLIST, '
+      # Here reads the environment
+      # of the account that runs it, which For takes as an argument, so a
+      # program needs no OS knowledge to find its folders. By file, at the
+      # module's root, and by the call's own line: os.Getenv anywhere else in
+      # appdirs is red. The system comes from here_*.go build files, so
+      # arch.ports.1 has no exclusion here.
+      - path: ^appdirs/here\.go$
+        linters: [forbidigo]
+        text: "cli\\.config\\.3:"
+        source: '^\tf, err := folders\(thisKind, app, home, os\.Getenv, layout\)$'
+      # The preset's row on os.UserConfigDir, os.UserCacheDir
+      # and os.UserHomeDir is lifted in every file. It named a preference, the
+      # paths helper, and no security or correctness reason.
+      - linters: [forbidigo]
+        text: "cli\\.config\\.5:"
+# slot overrides end

@@ -1,0 +1,504 @@
+# go-files' checks, in the three tiers every project's gate has (pre-commit, pre-push, release).
+# Run one with `go tool -modfile=tools/task.mod task <tier>`; each tool is pinned in tools/<tool>.mod
+# and built by go tool on first use, so nothing is installed on the machine.
+#
+# A tier is a task whose members run together (deps:), each member with a timeout: on its cmds
+# line. A member waits only for one it needs; none of these needs another, so none waits. A tier
+# starts and ends with gate/budget.sh, which has hatch budget hold its elapsed seconds to its budget
+# in gate/budgets.yaml. hatch is pinned in
+# tools/hatch.mod and called through go tool, as test calls hatch tests.
+#
+# A member that reads only the tree skips when its inputs are what they were at its last pass:
+# fmt, vet, build, lint, size, tidy and licenses, and vuln, whose inputs are the module
+# graph and not the tree alone (its own comment says why). Each names its inputs in sources:, the
+# Taskfile among them, so a changed line of its own reruns it. go-task writes a member's checksum
+# before the member runs and removes it only when a command fails, so a run killed mid-member
+# (SIGKILL, a closed session) leaves the checksum of a member that never passed. So each such
+# member also names a stamp, .task/pass/<member>-<go version>, in generates:: its first command
+# removes the stamp, its last writes it, and a member whose stamp is missing runs, whatever the
+# checksum says. The stamp is named by `go env GOVERSION`, so a member that passed under one Go runs
+# again under another, as go.mod's toolchain line is a minimum and a newer Go may run in its place.
+# vuln's stamp most of all: govulncheck's findings in the standard
+# library are the Go it runs under.
+# The members that read more than the tree never skip: test (whose packages go test's own cache may
+# report at pre-push), secrets and secrets-tree, verify (the module cache), changelog and contract
+# (the tags, which give the base of its removed-line check); so does
+# unread, which reads every file of the tree, of any name, and so has no sources: to list. release
+# removes every stamp first and runs the tests uncached, so nothing in it skips, vuln included, whose
+# database moves.
+version: "3"
+
+env:
+  GOWORK: "off"
+  CGO_ENABLED: "0"
+
+vars:
+  GOVERSION: { sh: go env GOVERSION }
+
+tasks:
+  default:
+    desc: list the tasks
+    cmds:
+      - go tool -modfile=tools/task.mod task --list
+
+  # Each tier starts and ends with gate/budget.sh, its tier and step set here in literal words, as
+  # its comment says why: no start, load or tier rides a Task var, which the caller's environment
+  # would set over the tier's own. Its start is kept per run, so two runs of one tier each time
+  # themselves.
+  pre-commit:
+    desc: the tier that runs on every commit, fast
+    cmds:
+      - cmd: tier=pre-commit; step=start; . ./gate/budget.sh
+        silent: true
+        timeout: 1m
+      - task: pre-commit-members
+      - cmd: tier=pre-commit; step=end; . ./gate/budget.sh
+        silent: true
+        timeout: 1m
+
+  pre-commit-members:
+    internal: true
+    deps: [fmt, vet, lint, unread, secrets-tree, consumer, contract]
+
+  pre-push:
+    desc: the tier that runs on every push, and the only claim that counts as done
+    cmds:
+      - cmd: tier=pre-push; step=start; . ./gate/budget.sh
+        silent: true
+        timeout: 1m
+      - task: pre-push-members
+      - cmd: tier=pre-push; step=end; . ./gate/budget.sh
+        silent: true
+        timeout: 1m
+
+  pre-push-members:
+    internal: true
+    deps: [fmt, vet, lint, unread, secrets-tree, build, {task: test, vars: {RACE_EXIT_SLEEP: none, TEST_CACHE: used}}, size, tidy, secrets, vuln]
+
+  release:
+    desc: "the tier a release runs, VERSION its tag (as v0.1.0, or the tag the checkout is on): every member, none skipped, the module graph verified, the licences and the notes"
+    cmds:
+      - cmd: tier=release; step=start; . ./gate/budget.sh
+        silent: true
+        timeout: 1m
+      - cmd: rm -rf .task/pass
+      - task: release-members
+      - cmd: tier=release; step=end; . ./gate/budget.sh
+        silent: true
+        timeout: 1m
+
+  release-members:
+    internal: true
+    deps: [fmt, vet, lint, unread, secrets-tree, build, {task: test, vars: {RACE_EXIT_SLEEP: kept, TEST_CACHE: none}}, api, size, tidy, secrets, vuln, verify, licenses, changelog]
+
+  # warm is the step to run before a timed release run: it fills the Go cache with
+  # what release builds, and runs no test and no tier. go list -export compiles each package with
+  # its tests and their deps, and links nothing, for each system vet and build name and each lint
+  # reads. Go caches vet's verdicts under the analyzers each command runs (its action
+  # graph): so warm runs go vet as vet does, and go test -c as test does, which builds and vets
+  # each race test binary into .task/warm and runs none. go build is build's own line. go run
+  # caches the program it links, and measure, given no word, says so and does nothing. go tool -n
+  # builds a tool and prints where: with cgo off, as the members run the tools, and on, as test
+  # runs hatch and its tests run go-task. warm has no budget and no tier calls it: run it,
+  # then the one timed task release.
+  warm:
+    desc: "Build what release builds, and run no test: the packages and their tests for each system vet, build and lint read, go vet for the eight and go build for the six, the race test binaries (built and vetted, not run), measure, and each tool. Not timed; no tier calls it."
+    cmds:
+      - for: [linux/amd64, linux/arm64, linux/386, linux/arm, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
+        cmd: GOOS={{dir .ITEM}} GOARCH={{base .ITEM}} go list -export -test -deps ./... > /dev/null
+        timeout: 10m
+      - for: [linux, darwin, windows, freebsd, netbsd]
+        cmd: GOOS={{.ITEM}} go list -export -test -deps ./... > /dev/null
+        timeout: 10m
+      - for: [linux/amd64, linux/arm64, linux/386, linux/arm, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
+        cmd: GOOS={{dir .ITEM}} GOARCH={{base .ITEM}} go vet ./...
+        timeout: 10m
+      - for: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
+        cmd: GOOS={{dir .ITEM}} GOARCH={{base .ITEM}} go build ./...
+        timeout: 10m
+      - cmd: rm -rf .task/warm
+        timeout: 1m
+      - cmd: CGO_ENABLED=1 go test -race -c -o .task/warm/ ./...
+        timeout: 10m
+      - cmd: rm -rf .task/warm
+        timeout: 1m
+      # measure exits 2 at no word, and go run then 1, which would end the script here: the case
+      # reads what it said, so a build that fails still fails warm.
+      - cmd: |
+          out=$(go run ./internal/cmd/measure 2>&1) || true
+          case "$out" in *"measure takes one word"*) ;; *) echo "$out"; exit 1 ;; esac
+        timeout: 10m
+      - cmd: |
+          for cgo in 0 1; do
+            for mod in tools/*.mod; do
+              tool=$(basename "$mod" .mod)
+              CGO_ENABLED=$cgo go tool -modfile="$mod" -n "$tool" > /dev/null || exit 1
+            done
+          done
+        timeout: 10m
+
+  fmt:
+    desc: gofmt finds nothing to change
+    sources: ["**/*.go", Taskfile.yml]
+    generates: [".task/pass/fmt-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/fmt-{{.GOVERSION}}
+      - cmd: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "gofmt would change:"; echo "$out"; exit 1; fi
+        timeout: 1m
+      - mkdir -p .task/pass && touch .task/pass/fmt-{{.GOVERSION}}
+
+  vet:
+    desc: go vet, tests included, for linux, darwin and windows on amd64 and arm64, and linux on 386 and arm
+    sources: ["**/*.go", go.mod, go.sum, Taskfile.yml]
+    generates: [".task/pass/vet-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/vet-{{.GOVERSION}}
+      # The eight run together, as lint's five do: a for: matrix runs its items one after another,
+      # and vet was then the longest row of pre-push. The member fails if any fails.
+      # linux/386 and linux/arm are 32-bit, where a statfs field is int32, so a test that takes one
+      # as int64 fails to build there.
+      - cmd: |
+          pids=""
+          for target in linux/amd64 linux/arm64 linux/386 linux/arm darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go vet ./... &
+            pids="$pids $!"
+          done
+          bad=0
+          for p in $pids; do wait "$p" || bad=1; done
+          exit $bad
+        timeout: 5m
+      - mkdir -p .task/pass && touch .task/pass/vet-{{.GOVERSION}}
+
+  consumer:
+    desc: the second consumer's tests, a program of another business built with values unlike ours
+    sources: ["**/*.go", go.mod, go.sum, Taskfile.yml]
+    generates: [".task/pass/consumer-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/consumer-{{.GOVERSION}}
+      - cmd: go test ./internal/secondconsumer/
+        timeout: 1m
+      - mkdir -p .task/pass && touch .task/pass/consumer-{{.GOVERSION}}
+
+  # pre-push and release run internal/contract too, in test, with every package.
+  contract:
+    desc: "the promise index: each line of api/contract.txt names a test that is there, built and reaching no skip on each system it names, the file sorted with no line twice, and a line gone since the last tag before the head listed in api/breaks/<tag>.contract.txt. It reads the tags, so it never skips"
+    cmds:
+      - cmd: CGO_ENABLED=0 go test -count=1 ./internal/contract/
+        timeout: 1m
+
+  build:
+    desc: go build for linux, darwin and windows on amd64 and arm64
+    sources: ["**/*.go", go.mod, go.sum, Taskfile.yml]
+    generates: [".task/pass/build-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/build-{{.GOVERSION}}
+      # The six run together, as vet's do.
+      - cmd: |
+          pids=""
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go build ./... &
+            pids="$pids $!"
+          done
+          bad=0
+          for p in $pids; do wait "$p" || bad=1; done
+          exit $bad
+        timeout: 5m
+      - mkdir -p .task/pass && touch .task/pass/build-{{.GOVERSION}}
+
+  lint-here:
+    desc: golangci-lint with .golangci.yml, for this system. It joins no tier.
+    cmds:
+      - cmd: go tool -modfile=tools/golangci-lint.mod golangci-lint run ./...
+        timeout: 10m
+
+  lint:
+    desc: golangci-lint with .golangci.yml, for linux, darwin, windows, freebsd and netbsd, run together
+    sources: ["**/*.go", go.mod, go.sum, .golangci.yml, tools/golangci-lint.mod, tools/golangci-lint.sum, Taskfile.yml]
+    generates: [".task/pass/lint-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/lint-{{.GOVERSION}}
+      # go tool would build the linter for GOOS; -n names the one built for this system, which then
+      # reads the code as GOOS sees it. --allow-parallel-runners lets the five, and another
+      # clone's, share the linter's cache instead of refusing. freebsd is linted because the module
+      # builds for it, and a file only freebsd builds would pass every row of the register unread;
+      # netbsd stands for every other system the module builds for, the one appdirs/free_other.go
+      # is read on. unread refuses a Go file no system here reads.
+      - cmd: |
+          bin=$(go tool -modfile=tools/golangci-lint.mod -n golangci-lint) || exit 1
+          pids=""
+          for os in linux darwin windows freebsd netbsd; do
+            GOOS=$os "$bin" run --allow-parallel-runners ./... &
+            pids="$pids $!"
+          done
+          bad=0
+          for p in $pids; do wait "$p" || bad=1; done
+          exit $bad
+        timeout: 10m
+      # The layer rows are held by plants. A scratch module has one file for each row,
+      # importing what that row must refuse, and depguard's report must name that file with that
+      # row's list; a row loosened, dropped or matching no file leaves its plant unreported, and this
+      # is red. A code plant imports testkit, which no package's code may; a test
+      # plant imports lib, which stands for any package of the module no row allows. The run is for
+      # windows, the one system that builds every plant, the _windows.go ones among them.
+      - cmd: |
+          bin=$(go tool -modfile=tools/golangci-lint.mod -n golangci-lint) || exit 1
+          # task's own mktemp on Windows names a /tmp there is none of unless TMPDIR names the account's
+          # temp folder, which TEMP does there. The report says a path with the system's separator, read as /.
+          work=$(TMPDIR="${TMPDIR:-${TEMP:-/tmp}}" mktemp -d) || exit 1
+          trap 'rm -rf "$work"' EXIT
+          cp go.mod go.sum .golangci.yml "$work/"
+          mod=github.com/birdtable/go-files
+          kit=github.com/birdtable/go-testkit
+          # <file> <package clause> <import> <list the report must name>
+          plants="
+          trust/p.go trust $kit layer-trust
+          trust/p_test.go trust $mod/lib layer-trust-tests
+          confine/p.go confine $kit layer-confine
+          confine/p_windows.go confine $kit layer-confine-windows
+          confine/p_test.go confine $mod/lib layer-confine-tests
+          write/p.go write $kit layer-write
+          write/p_windows.go write $kit layer-write-windows
+          write/p_test.go write $mod/lib layer-write-tests
+          treesum/p.go treesum $kit layer-treesum
+          treesum/p_test.go treesum $mod/lib layer-treesum-tests
+          nowait/p.go nowait $kit layer-nowait
+          nowait/p_test.go nowait $mod/lib layer-nowait-tests
+          splice/p.go splice $kit layer-splice
+          splice/p_test.go splice $mod/lib layer-splice-tests
+          lock/p.go lock $kit layer-lock
+          lock/p_windows.go lock $kit layer-lock-windows
+          lock/p_test.go lock $mod/lib layer-lock-tests
+          appdirs/p.go appdirs $kit layer-appdirs
+          appdirs/p_windows.go appdirs $kit layer-appdirs-windows
+          appdirs/p_test.go appdirs $mod/lib layer-appdirs-tests
+          trust/trusttest/p.go trusttest $kit layer-trusttest
+          trust/trusttest/p_test.go trusttest $mod/lib layer-trusttest-tests
+          filestest/p.go filestest $kit layer-filestest
+          filestest/p_test.go filestest $mod/lib layer-filestest-tests
+          internal/fileid/p.go fileid $kit layer-internal
+          internal/fileid/p_test.go fileid $mod/lib layer-internal
+          internal/cmd/measure/p.go measure $kit layer-internal
+          internal/winapi/p.go winapi $kit layer-winapi
+          internal/winapi/p_test.go winapi $mod/lib layer-winapi-tests
+          internal/testtoken/p.go testtoken $mod/lib layer-testtoken
+          internal/secondconsumer/p_test.go secondconsumer $mod/lib layer-second-consumer
+          p_test.go gofiles_test $mod/lib layer-no-row
+          gate/p.go gate golang.org/x/sys/cpu layer-no-row
+          lock/build/p.go build golang.org/x/sys/cpu layer-no-row
+          internal/other/p_test.go other $mod/lib layer-no-row
+          "
+          mkdir -p "$work/lib" && printf 'package lib\n' >"$work/lib/stub.go" || exit 1
+          echo "$plants" | while read -r f pkg imp list; do
+            [ -n "$f" ] || continue
+            mkdir -p "$work/$(dirname "$f")" && printf 'package %s\n\nimport _ "%s"\n' "$pkg" "$imp" >"$work/$f" || exit 1
+          done || exit 1
+          (cd "$work" && GOOS=windows "$bin" run --allow-parallel-runners --default none --enable depguard --max-issues-per-linter 0 --max-same-issues 0 ./... >"$work/raw" 2>&1) || true
+          tr '\\' / <"$work/raw" >"$work/report" || exit 1
+          echo "$plants" | while read -r f pkg imp list; do
+            [ -n "$f" ] || continue
+            if ! grep -q "^$f:.*from list '$list'" "$work/report"; then echo "lint: the plant $f ($imp) is not refused by $list" >&2; echo bad >>"$work/bad"; fi
+          done
+          if [ -f "$work/bad" ]; then cat "$work/report" >&2; exit 1; fi
+          exit 0
+        timeout: 10m
+      - mkdir -p .task/pass && touch .task/pass/lint-{{.GOVERSION}}
+
+  test:
+    desc: every test, with the race detector, in a random order (in their order, cached passes reported as passes, at TEST_CACHE=used, as pre-push runs it); a skip fails, on every system
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      # hatch tests runs go test -json and judges the counts: a failure, no test run, or any
+      # test skipped is red, the skipped named. It holds the stream, prints it on a red and drops it
+      # on a green, and kills the run, tree and all, at its --timeout. go test's own -timeout is
+      # under hatch's and hatch's under the member's, so a test that hangs is reported by go test,
+      # with every goroutine's stack, before either kills the run.
+      #
+      # A race-built binary sleeps a second as it exits, so a goroutine still running after the last
+      # test can race and be reported. The tests that start their own binary again as a helper pay
+      # that second at every start, five in a row in each of write's umask tests. Pre-push passes
+      # RACE_EXIT_SLEEP none, and its run exits at once: a race inside a test still fails that test,
+      # but a race only a goroutine left running after its test, or after a helper's work, would
+      # make goes unseen there. Release passes kept, so the sleep is the default and release sees
+      # it, on every system its workflow runs. Each tier passes its value: go-task takes a variable
+      # from the environment only where the call gives none. testkit keeps GORACE, so a helper has
+      # what its test binary had.
+      #
+      # Pre-push passes TEST_CACHE used, and go test then reports a package whose test binary, and
+      # the files and environment its tests read, are what they were at a pass, as that pass, without
+      # running it. The cache takes only a run whose flags are all of go test's
+      # cacheable ones, which -shuffle and -count are not, so pre-push runs the tests in their written
+      # order. Any other value, or none, as release and a run of test alone give, runs every test, in
+      # a random order. A test that reads the tree through a child, as go list or go build, stats or
+      # opens in its own process what the child reads, so the cache keys the pass on it.
+      #
+      # At TEST_CACHE used, pre-push also leaves to release one test over a second that guards no
+      # fail-open and is in no guard row: the tiers' test-cache
+      # flags, which release runs and holds. A test a guard row names stays here. -skip,
+      # unlike t.Skip, reports no skip, and is one of go test's cacheable flags. The names are
+      # written here, not in a variable a caller's environment could set over them, and
+      # TestOnlyThePushTierRunsTheTestsWithNoRaceExitSleep holds the list.
+      - cmd: |
+          {{if eq .RACE_EXIT_SLEEP "none"}}export GORACE="${GORACE:+$GORACE }atexit_sleep_ms=0"{{end}}
+          go tool -modfile=tools/hatch.mod hatch tests --timeout 9m30s --red-when failed,none-ran,any-skipped --green-word green --red-word red -race{{if ne .TEST_CACHE "used"}} -shuffle=on -count=1{{else}} -skip '^(TestOnlyThePushTierUsesTheTestCache)$'{{end}} -timeout=9m ./...
+        timeout: 10m
+
+  unread:
+    desc: "no file anywhere in the tree, testdata included, that the go command builds and lint does not read: assembly, C, C++, Objective-C, Fortran and SWIG, .syso, a Go file importing C, a Go file that by its name and build constraint no lint run reads on amd64 or on arm64 (for no system of lint's loop, or only with race or cgo), and any link; one passes every row of the register unread"
+    cmds:
+      # It never skips: a planted file is no input a sources: list of Go files would see. It reads
+      # the systems from lint's own loop below, the one line of its form in this file.
+      - cmd: go run ./internal/cmd/measure unread
+        timeout: 2m
+
+  # api holds the exported surface with apidiff. gate/api.sh says
+  # what it holds. It runs in the release tier alone: in pre-push its six export writes filled the
+  # tier's 10 s budget, so it left for release, which a pull request's run on each system before
+  # it merges and every tag's run reach. The surface is read
+  # with `go doc -all <package>@<tag>`, which needs no checkout. It never skips: the last tag is no
+  # input a sources: list would see.
+  api:
+    desc: fail unless apidiff finds darwin, linux and windows alike but for api/systems.txt, the breaks since the last tag are api/breaks/<tag>.txt, and go doc finds each name api/marks.txt marks
+    cmds:
+      - cmd: . ./gate/api.sh
+        timeout: 2m
+
+  size:
+    desc: the non-test Go lines outside internal/ but internal/winapi, as wc -l counts them; fails above the ceiling of 13,508, or treesum's of 548
+    sources: ["**/*.go", Taskfile.yml]
+    generates: [".task/pass/size-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/size-{{.GOVERSION}}
+      - cmd: go run ./internal/cmd/measure size
+        timeout: 2m
+      - mkdir -p .task/pass && touch .task/pass/size-{{.GOVERSION}}
+
+  tidy:
+    desc: go.mod, go.sum and each tool's modfile are what go mod tidy leaves
+    sources: ["**/*.go", go.mod, go.sum, "tools/*.mod", "tools/*.sum", Taskfile.yml]
+    generates: [".task/pass/tidy-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/tidy-{{.GOVERSION}}
+      - cmd: |
+          go mod tidy -diff || exit 1
+          for mod in tools/*.mod; do go mod tidy -modfile="$mod" -diff || exit 1; done
+        timeout: 2m
+      # go.mod requires testkit for the tests, and nothing it requires, however far
+      # down, is go-proc, out of which testkit was moved. depguard's code rows refuse testkit to
+      # every package's code.
+      - cmd: |
+          graph=$(go mod graph) || exit 1
+          case "$graph" in *" github.com/birdtable/go-testkit@"*) ;; *) echo "tidy: go mod graph names no requirement of github.com/birdtable/go-testkit, which the tests import" >&2; exit 1 ;; esac
+          case "$graph" in *github.com/birdtable/go-proc*) echo "tidy: go mod graph names go-proc:" >&2; echo "$graph" | grep go-proc >&2; exit 1 ;; esac
+          exit 0
+        timeout: 2m
+      - mkdir -p .task/pass && touch .task/pass/tidy-{{.GOVERSION}}
+
+  verify:
+    desc: the module graph's downloads are what go.sum pins
+    cmds:
+      - cmd: go mod verify
+        timeout: 2m
+
+  # gitleaks git passes, having scanned 0 commits, where git reads no history:
+  # a tree taken from a tarball, or a .git it may not read. So secrets asks git
+  # first, by git's own exit, and fails with a line that says why; gitleaks'
+  # own exit then decides the scan. secrets-tree needs no history.
+  secrets-tree:
+    desc: gitleaks over the tree as it stands, committed or not, with no history needed. The line to run on a tree taken from a tarball.
+    cmds:
+      - cmd: go tool -modfile=tools/gitleaks.mod gitleaks dir . --config .gitleaks.toml --no-banner --redact
+        timeout: 10m
+
+  secrets:
+    desc: gitleaks over the history. Fails where this tree has no history of its own to scan; secrets-tree scans the tree alone.
+    cmds:
+      - cmd: |
+          why=""
+          if ! top="$(git rev-parse --show-cdup 2>/dev/null)"; then
+            why="git reads no repository here (no .git, or one it may not read)"
+          elif [ -n "$top" ]; then
+            why="the repository git reads is a folder above this tree, not the tree's own"
+          elif ! git rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
+            why="the repository has no commit"
+          fi
+          if [ -n "$why" ]; then
+            echo "secrets: no history to scan: $why, and gitleaks would pass having scanned 0 commits. secrets-tree scans the tree alone." >&2
+            exit 1
+          fi
+        timeout: 1m
+      - cmd: go tool -modfile=tools/gitleaks.mod gitleaks git . --config .gitleaks.toml --no-banner --redact
+        timeout: 10m
+
+  # vuln skips where go.mod, go.sum and its own tool are what they were at its last pass under the
+  # same Go: pre-push runs it when a push changes the module graph, or the Go that
+  # runs it, whose standard library govulncheck checks too. Its database moves, and a change to the
+  # code alone can reach a symbol it lists, so release, which removes every stamp, runs it whatever
+  # the checksums say.
+  vuln:
+    desc: govulncheck over the module
+    sources: [go.mod, go.sum, tools/govulncheck.mod, tools/govulncheck.sum, Taskfile.yml]
+    generates: [".task/pass/vuln-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/vuln-{{.GOVERSION}}
+      - cmd: go tool -modfile=tools/govulncheck.mod govulncheck ./...
+        timeout: 10m
+      - mkdir -p .task/pass && touch .task/pass/vuln-{{.GOVERSION}}
+
+  licenses:
+    desc: every module the packages link has a licence that allows the library's own
+    sources: ["**/*.go", go.mod, go.sum, tools/go-licenses.mod, tools/go-licenses.sum, Taskfile.yml]
+    generates: [".task/pass/licenses-{{.GOVERSION}}"]
+    cmds:
+      - rm -f .task/pass/licenses-{{.GOVERSION}}
+      - cmd: go tool -modfile=tools/go-licenses.mod go-licenses check ./... --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT
+        timeout: 10m
+      - mkdir -p .task/pass && touch .task/pass/licenses-{{.GOVERSION}}
+
+  changelog:
+    desc: "CHANGELOG.md is what changie merge writes, and the version has its notes: .changes/<version>.md, or what changie batch would make of the unreleased entries. The version is VERSION, or the tag the checkout is on."
+    # VERSION reaches the script as a variable, never as text pasted into it, so no value is shell.
+    # The release workflow checks out the tag and runs the
+    # tier with no VERSION, so the tag the checkout is on stands for it.
+    env:
+      VERSION: "{{.VERSION}}"
+    cmds:
+      - cmd: |
+          changie="go tool -modfile=tools/changie.mod changie"
+          $changie merge --dry-run | diff - CHANGELOG.md || {
+            echo "CHANGELOG.md is not what changie merge writes"; exit 1; }
+          tag=$(git describe --tags --exact-match 2>/dev/null || true)
+          v=${VERSION:-$tag}
+          if [ -z "$v" ]; then
+            echo "the release wants VERSION, as VERSION=v0.1.0, where the checkout is on no tag"; exit 1
+          fi
+          bad() { printf 'the version is %s, and wants a tag such as v0.1.0\n' "$v"; exit 1; }
+          case "$v" in *[!v0-9.]*) bad ;; esac
+          printf '%s\n' "$v" | grep -Eqx 'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)' || bad
+          if [ -n "$tag" ] && [ "$tag" != "$v" ]; then
+            echo "the checkout is tagged $tag, and VERSION is $v"; exit 1
+          fi
+          if [ -f ".changes/$v.md" ]; then
+            echo "the notes of $v: .changes/$v.md"; exit 0
+          fi
+          if [ -n "$tag" ]; then
+            echo "the tag $tag has no entry, .changes/$tag.md"; exit 1
+          fi
+          notes=$($changie batch "$v" --dry-run) || exit 1
+          case "$notes" in
+            *"
+          - "*) echo "the notes changie batch $v would make:"; echo "$notes" ;;
+            *) echo "changie batch $v would make notes of no entry"; exit 1 ;;
+          esac
+        timeout: 2m
+
+  hooks:
+    desc: install the pre-push hook, once per clone
+    cmds:
+      - cmd: |
+          hooks=$(git rev-parse --git-path hooks)
+          mkdir -p "$hooks"
+          cp hooks/pre-push "$hooks/pre-push"
+          chmod +x "$hooks/pre-push"

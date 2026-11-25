@@ -1,0 +1,3 @@
+- ./treesum.Caps: old is comparable, new is not
+- ./write.KeepIn: changed from func(*os.Root, string, string, ...Option) error to func(*os.Root, string, *os.Root, string, ...Option) error
+- ./write.PutBackIn: changed from func(*os.Root, string, string, [32]byte, ...Option) error to func(*os.Root, string, *os.Root, string, [32]byte, ...Option) error

@@ -1,0 +1,20 @@
+# Each tier's budget and measured floor, in seconds, on the kind of host the host line names. The budget
+# is the most a tier may take there: commit 2 s, push 10 s, release 15 s; it stands over any rule of floor
+# times a factor. The floor is the least of three runs of the tier from a fresh clone on that kind of host,
+# kept beside its budget. A tier that runs past its budget on that kind of host fails, but for a pre-commit
+# or pre-push whose 1-minute load at its start was above 15, which passes saying so. The floors were
+# measured on a busy host, at 1-minute loads of 9 to 49, the task cache cleared before each run.
+# The release tier run on Linux or Windows amd64 outside a hosted runner (GITHUB_ACTIONS unset) has its own budget,
+# release-session-budget. On any other kind of host no budget applies, and the time is printed.
+# A hosted runner (GITHUB_ACTIONS set) has no budget: its run is held by the 20-minute timeout of its job.
+# hatch budget reads a budget from the row `<id>-budget: <seconds>`, its expression given by gate/budget.sh,
+# and gate/budget.sh reads the host line with awk, so the shape is narrow: a comment line, or a key, a colon,
+# a space and a number.
+host: Darwin-arm64
+pre-commit-floor: 2.56
+pre-commit-budget: 2
+pre-push-floor: 7.95
+pre-push-budget: 10
+release-floor: 8.15
+release-budget: 15
+release-session-budget: 60

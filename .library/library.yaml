@@ -1,0 +1,49 @@
+# go-files' library file: each package a program imports, its one job, and the calls of that job a
+# program no longer needs to make by hand once it imports the package, each call in its import-path
+# or package-and-name form.
+#
+# What has no such form is left to a program's own review: a temp file renamed over the target by
+# hand, os.WriteFile followed by os.Rename in one function, and a copy kept before a change by a
+# helper of a program's own (write); filepath.IsLocal as the only guard before a put-back (confine);
+# a hand-written owner and mode walk and a hand /etc/group parser (trust).
+packages:
+  - package: "write"
+    job: "replace a file whole over os.Root, so a killed run leaves the old file: Mode, NoReplace, NoSync, IfHolds, FileIn and FileFrom, Keep and PutBack, Check, Runnable under the fork lock, and a capped Append"
+    banned_calls:
+      - "github.com/google/renameio"
+      - "github.com/moby/sys/atomicwriter"
+      - "github.com/natefinch/atomic"
+      - "github.com/dchest/safefile"
+      - "tailscale.com/atomicfile"
+  - package: "lock"
+    job: "one holder per path on the kernel's lock, with a holder note: Take, Wait, Held, IsHeld, Holder, Note, By and Since"
+    banned_calls:
+      - "github.com/gofrs/flock"
+      - "github.com/alexflint/go-filemutex"
+      - "github.com/juju/fslock"
+      - "github.com/nightlyone/lockfile"
+      - "syscall.Flock"
+      - "golang.org/x/sys/unix.Flock"
+      - "golang.org/x/sys/windows.LockFileEx"
+  - package: "confine"
+    job: "a name stays beneath a folder and follows no link: Local, NoLinks, Open, RenameNoReplace and RenameExchange, and LinkFolder, a link to a folder made beneath it, a junction on Windows, beside std os.Root, which programs call directly"
+    banned_calls:
+      - "github.com/cyphar/filepath-securejoin"
+      - "github.com/google/safeopen"
+      - "github.com/containerd/continuity"
+      - "golang.org/x/sys/unix.Openat2"
+      - "golang.org/x/sys/unix.Renameat2"
+  - package: "trust"
+    job: "who owns a path and who else can write it, before a program runs it, reads it or makes a socket in it: Path and ReadOwned with Who"
+    banned_calls:
+      - "github.com/moby/sys/user"
+      - "github.com/hectane/go-acl"
+  - package: "appdirs"
+    job: "a program's config, state, cache, run and data folders on each system, from what it is handed, and Free, the room left on a volume"
+    banned_calls:
+      - "github.com/adrg/xdg"
+      - "github.com/kirsle/configdir"
+      - "os.UserConfigDir"
+      - "os.UserCacheDir"
+      - "os.UserHomeDir"
+      - "golang.org/x/sys/unix.Statfs"

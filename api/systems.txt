@@ -1,0 +1,6 @@
+# The exported surface's differences between the systems that task api holds:
+# apidiff's full report from darwin to linux and from darwin to windows, each line led by the system and
+# a tab, as task api prints it on a red. A line here is a name meant to differ by system. Lines starting
+# with # are not compared.
+windows	Incompatible changes:
+windows	- ./appdirs.HomeVar: value changed from "HOME" to "USERPROFILE"

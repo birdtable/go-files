@@ -1,0 +1,379 @@
+# go-files' uses file: the jobs this repo does with a picked library or tool, the ban that keeps a
+# second way out, and what each pick replaced, with each ban named as the row of .golangci.yml that
+# holds it.
+repo: "go-files"
+plan_key_prefix: "go-files"
+is_library: true
+issue_key: "go-files-lib-1"
+picks:
+  - item: "golang.org/x/sys v0.50.0 (unix and windows)"
+    register_key: "file-owner-and-mode"
+    job: "OS calls: Openat2, Renameat2, RenameatxNp, O_NOFOLLOW_ANY, Getxattr, Statfs, GetDiskFreeSpaceEx, the Windows security descriptor and MoveFileEx calls"
+    scope: "go-files only, in the per-system files of write, confine, trust and appdirs (v0.50.0 is admitted from 20 Nov 2026; the bump from v0.47.0 is its own commit)"
+    ban: "depguard row register-bans (github.com/moby/sys/user, in every file: correctness, it parses a garbled gid as 0, so a group check passes wrongly); row os-host (golang.org/x/sys outside write, confine, trust, lock and appdirs: the calls of each system stay in its own files) and rows layer-lock and layer-internal (strict: no x/sys in lock or internal); forbidigo row register raw call (Syscall, RawSyscall, each numbered and N form, their NoError forms, and AllThreadsSyscall and AllThreadsSyscall6, of syscall or golang.org/x/sys/unix, in every file, the system files of write, confine and lock included: a call by number would get past the confine-to-folder and path-lock rows); godox row register linkname (a //go:linkname directive, in every file, tests included, with no exclusion: it binds a name to a libc trampoline or a runtime symbol past x/sys's named calls, as a raw call would); Taskfile member unread, in every tier (no file the go command builds and golangci-lint does not read, anywhere in the tree, testdata included, whatever its build tags: assembly, C, C++, Objective-C, Fortran and SWIG, .syso, a Go file importing C, a Go file that by go/build's match of its name and build constraint no lint run reads on amd64 or on arm64 with cgo and race off, and any link or name neither a file nor a folder); every row is linted for linux, darwin, windows, freebsd and netbsd, so a file only freebsd builds, and appdirs/free_other.go, are read"
+    banned_calls:
+      - "github.com/moby/sys/user"
+      - "syscall.Syscall"
+      - "syscall.Syscall6"
+      - "syscall.Syscall9"
+      - "syscall.Syscall12"
+      - "syscall.Syscall15"
+      - "syscall.Syscall18"
+      - "syscall.SyscallN"
+      - "syscall.RawSyscall"
+      - "syscall.RawSyscall6"
+      - "syscall.AllThreadsSyscall"
+      - "syscall.AllThreadsSyscall6"
+      - "golang.org/x/sys/unix.Syscall"
+      - "golang.org/x/sys/unix.Syscall6"
+      - "golang.org/x/sys/unix.Syscall9"
+      - "golang.org/x/sys/unix.SyscallNoError"
+      - "golang.org/x/sys/unix.RawSyscall"
+      - "golang.org/x/sys/unix.RawSyscall6"
+      - "golang.org/x/sys/unix.RawSyscallNoError"
+    pattern: "\"/etc/group\"|getent|dscacheutil"
+    sources:
+      - ".golangci.yml depguard rows register-bans, os-host, layer-lock and layer-internal"
+      - ".golangci.yml forbidigo row register raw call and godox row register linkname"
+      - "Taskfile.yml task unread"
+      - "the per-system files of write, confine, trust and appdirs"
+  - item: "os.Root (Go 1.27)"
+    register_key: "confine-to-folder"
+    job: "open, create and rename inside a folder and never leave it; write and confine are built on it"
+    scope: "write and confine; programs call it directly"
+    ban: "depguard row register-bans (github.com/cyphar/filepath-securejoin and github.com/containerd/continuity, in every file: security, the portable call of each, SecureJoin and fs.RootPath, returns a path resolved before the open, so a link swapped in after it is followed; securejoin's safe API is Linux alone, as a read of each one's source shows); forbidigo row register confine-to-folder (^unix\\.(Openat2|Renameat2)$, outside confine's Linux files and their tests: confine/*_linux.go and confine/*_linux_test.go at the module's root, not a nested confine/ folder, which is narrower than the matrix's host layer; security: a hand call elsewhere can leave out confine's resolve flags and follow a link out of the folder)"
+    banned_calls:
+      - "github.com/cyphar/filepath-securejoin"
+      - "github.com/containerd/continuity"
+      - "golang.org/x/sys/unix.Openat2"
+      - "golang.org/x/sys/unix.Renameat2"
+    pattern: "filepath\\.EvalSymlinks|RESOLVE_(BENEATH|IN_ROOT|NO_SYMLINKS)|strings\\.HasPrefix\\([^)]*filepath\\.Clean"
+    sources:
+      - ".golangci.yml depguard row register-bans and forbidigo row register confine-to-folder"
+      - "write and confine, built on os.Root"
+  - item: "the kernel's lock, syscall.Flock and golang.org/x/sys/windows.LockFileEx, on the file lock opened and checked"
+    register_key: "path-lock"
+    job: "the lock under lock.Take on every system lock builds on, flock(2) on Unix and the LockFileEx byte lock on Windows, on the one descriptor or handle lock opened and checked, the name read again once it is held (github.com/gofrs/flock, used for a time, opened the name a second time and left go-files)"
+    scope: "lock/flock.go and lock/lock_windows.go of the lock package"
+    ban: "depguard row register-flock (github.com/gofrs/flock in every file: the guest link test, write and confine link the standard library and x/sys alone; security, a lock taken through it opens the name again and skips lock's refusals), row register-bans (github.com/nightlyone/lockfile, in every file: correctness, a pid file, not a kernel lock, so a reused pid holds it; github.com/alexflint/go-filemutex and github.com/juju/fslock, in every file: security, each opens the lock's name following a link and locks it by hand, past lock's refusals, and fslock reaches LockFileEx by a proc and a raw call, go-filemutex v1.3.0 filemutex_flock.go:22 and filemutex_windows.go:18, fslock 4d5c94c67b4b fslock_nix.go:50 and fslock_windows.go:14-15 and :134); forbidigo row register path-lock (^(syscall|unix)\\.Flock$ and ^windows\\.(Lock|Unlock)FileEx$, in every file but lock/flock.go and lock/lock_windows.go, lock's, and write/write_unix.go and write/write_windows.go, Append's, at the module's root: security, a lock taken by hand elsewhere skips lock's refusals and follows a link at the lock's name); forbidigo row register DLL proc (a DLL loaded by NewLazyDLL, NewLazySystemDLL, LoadDLL, MustLoadDLL, LoadLibrary or LoadLibraryEx, a proc found in one by NewProc, FindProc, MustFindProc or x/sys's by-ordinal forms, or its address read by GetProcAddress or GetProcAddressByOrdinal, as go-socket's row, and the types DLL, LazyDLL, Proc and LazyProc at each mention, as a literal LazyDLL loads with no call, of syscall or golang.org/x/sys/windows, in every file with no exclusion: LockFileEx reached by name, through a proc, would get past the path-lock row); the notes say why write's two system files are excepted"
+    banned_calls:
+      - "github.com/gofrs/flock"
+      - "github.com/alexflint/go-filemutex"
+      - "github.com/juju/fslock"
+      - "github.com/nightlyone/lockfile"
+      - "syscall.Flock"
+      - "golang.org/x/sys/unix.Flock"
+      - "golang.org/x/sys/windows.LockFileEx"
+      - "syscall.NewLazyDLL"
+      - "syscall.LoadDLL"
+      - "syscall.MustLoadDLL"
+      - "syscall.LazyDLL.NewProc"
+      - "syscall.DLL.FindProc"
+      - "syscall.DLL.MustFindProc"
+      - "golang.org/x/sys/windows.NewLazyDLL"
+      - "golang.org/x/sys/windows.NewLazySystemDLL"
+      - "golang.org/x/sys/windows.LoadDLL"
+      - "golang.org/x/sys/windows.MustLoadDLL"
+      - "golang.org/x/sys/windows.LazyDLL.NewProc"
+      - "golang.org/x/sys/windows.DLL.FindProc"
+      - "golang.org/x/sys/windows.DLL.MustFindProc"
+      - "golang.org/x/sys/windows.DLL.FindProcByOrdinal"
+      - "golang.org/x/sys/windows.DLL.MustFindProcByOrdinal"
+      - "syscall.LoadLibrary"
+      - "syscall.GetProcAddress"
+      - "golang.org/x/sys/windows.LoadLibrary"
+      - "golang.org/x/sys/windows.LoadLibraryEx"
+      - "golang.org/x/sys/windows.GetProcAddress"
+      - "golang.org/x/sys/windows.GetProcAddressByOrdinal"
+      - "syscall.DLL"
+      - "syscall.LazyDLL"
+      - "syscall.Proc"
+      - "syscall.LazyProc"
+      - "golang.org/x/sys/windows.DLL"
+      - "golang.org/x/sys/windows.LazyDLL"
+      - "golang.org/x/sys/windows.Proc"
+      - "golang.org/x/sys/windows.LazyProc"
+    pattern: "(syscall|unix)\\.Flock\\(|windows\\.LockFileEx\\(|\\.pid\"|os\\.FindProcess\\("
+    sources:
+      - ".golangci.yml depguard rows register-flock and register-bans"
+      - ".golangci.yml forbidigo rows register path-lock and register DLL proc"
+      - "lock/flock.go and lock/lock_windows.go"
+  - item: "std syscall.Flock, crypto/sha256, errors.ErrUnsupported"
+    register_key: "std-small"
+    job: "Append's Unix lock on its log's own descriptor; the IfHolds digest; typed refusals that wrap ErrUnsupported"
+    scope: "go-files"
+    ban: "none: review only"
+    banned_calls: []
+    pattern: "errors\\.New\\(\"[^\"]*(unsupported|not supported)"
+    sources:
+      - "write/write_unix.go, Append's lock"
+      - "each package's named errors, which wrap errors.ErrUnsupported"
+  - item: "link test: write and confine import std and x/sys only"
+    register_key: "std:link-test"
+    job: "a guest program imports write and confine by exact path, so `go list -deps` of each on linux holds only the standard library and golang.org/x/sys"
+    scope: "the write and confine packages"
+    ban: "depguard rows layer-write, layer-write-windows, layer-confine and layer-confine-windows (strict: the standard library, golang.org/x/sys and what each row names), rows layer-write-tests and layer-confine-tests, and row register-flock (github.com/gofrs/flock); the plants of task lint are the proof"
+    banned_calls:
+      - "github.com/gofrs/flock"
+    pattern: "\"github\\.com/birdtable/go-files/(lock|trust|appdirs)\""
+    sources:
+      - ".golangci.yml depguard rows layer-write, layer-write-windows, layer-confine and layer-confine-windows"
+      - "the plants of task lint"
+    adopted_by:
+      - "go-files-2"
+  - item: "golangci-lint v2.15.0"
+    register_key: "tool:golangci-lint"
+    job: "lint from the repo's own .golangci.yml with the bans of the register"
+    scope: "the repo"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "build\\.(ImportDir|Default)\\b|parser\\.ImportsOnly|lint-debt|lintdebt"
+    sources:
+      - ".golangci.yml"
+      - "tools/golangci-lint.mod"
+  - item: "gitleaks v8.30.1"
+    register_key: "tool:gitleaks"
+    job: "secret scan from the repo's own config"
+    scope: "the repo Taskfile"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "regexp\\.MustCompile\\(.*(token|secret|password)"
+    sources:
+      - ".gitleaks.toml"
+      - "tools/gitleaks.mod"
+  - item: "go-task v3.54.0 (the repo's own Taskfile)"
+    register_key: "tool:go-task"
+    job: "the tiers pre-commit, pre-push and release"
+    scope: "the repo"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "exec\\.Command\\(\"make\"|\\.stamp\\b|tier[A-Za-z]*Pool"
+    sources:
+      - "Taskfile.yml"
+      - "tools/task.mod"
+  - item: "changie v1.26.0"
+    register_key: "tool:changie"
+    job: "changelog from change files; a library releases with a tag and a changie entry"
+    scope: "the repo"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "git log|conventional commit"
+    sources:
+      - ".changie.yaml"
+      - "tools/changie.mod"
+  - item: "hatch v0.2.0"
+    register_key: "tool:hatch"
+    job: "each tier's load-aware budget (hatch budget) and the race tests' verdict, a skip or zero tests red (hatch tests)"
+    scope: "the repo Taskfile and gate/budget.sh"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "test2json|json:\"Action\"|\"-json\"|vm.loadavg|/proc/loadavg"
+    sources:
+      - "gate/budgets.yaml"
+      - "tools/hatch.mod"
+  - item: "govulncheck v1.9.0"
+    register_key: "tool:govulncheck"
+    job: "vulnerability scan of the module graph"
+    scope: "the repo Taskfile"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "osv\\.dev|vuln\\.go\\.dev"
+    sources:
+      - "Taskfile.yml task vuln"
+      - "tools/govulncheck.mod"
+  - item: "go-licenses v2.0.1"
+    register_key: "tool:go-licenses"
+    job: "licence check and notices"
+    scope: "the repo Taskfile and release tier"
+    ban: "none: the tool itself"
+    banned_calls: []
+    pattern: "licen[cs]e.*walk|filepath\\.Walk.*LICENSE"
+    sources:
+      - "Taskfile.yml"
+      - "tools/go-licenses.mod"
+not_for_this_repo:
+  - item: "github.com/rogpeppe/go-internal/lockedfile v1.16.0"
+    why: "go-files does not wrap it: a program that locks a data file it also reads calls it itself in one package. It appeared only in a probe of the Windows lock. A ban that denies it outside the one data-file package is the programs' to carry; go-files takes none."
+    sources:
+      - "lock/flock.go: lock calls the kernel's lock itself"
+  - item: "github.com/google/renameio/v2, github.com/moby/sys/atomicwriter, github.com/rogpeppe/go-internal/robustio, github.com/natefinch/atomic, github.com/dchest/safefile, tailscale.com/atomicfile"
+    why: "not libraries to call: the target writes over os.Root in about 320 own lines (the standard library has no atomic write: golang.org/issue/22397). The first five are denied (depguard row register-bans) for correctness: none flushes the folder after its rename, so a replace is lost on a power cut; renameio exports nothing on Windows, and the other four write by path, never beneath a held folder, as a read of each one's source shows. robustio has no ban row."
+    sources:
+      - ".golangci.yml depguard row register-bans"
+      - "write: the replace over os.Root"
+  - item: "github.com/adrg/xdg, github.com/kirsle/configdir"
+    why: "appdirs is own code (about 115 lines). Neither is denied: a ban on them, or on os.UserConfigDir, os.UserCacheDir and os.UserHomeDir, would name a preference, not a security or correctness reason. A later change may move appdirs onto adrg/xdg."
+    sources:
+      - "appdirs: own code over the standard library and x/sys"
+  - item: "github.com/moby/sys/user, github.com/hectane/go-acl"
+    why: "moby/sys/user is denied for correctness: it parses a garbled gid as 0, so a group check passes wrongly. go-files has no such parser. go-acl is not taken, as trust reads a Windows access list through x/sys/windows, and is not denied: a ban would name a preference."
+    sources:
+      - ".golangci.yml depguard row register-bans"
+      - "trust: the Windows access list read through x/sys/windows"
+  - item: "github.com/cyphar/filepath-securejoin, github.com/google/safeopen, github.com/containerd/continuity"
+    why: "os.Root is called directly. filepath-securejoin and continuity are denied for security: the portable call of each, SecureJoin and fs.RootPath, returns a path resolved before the open, so a link swapped in after it is followed, and securejoin's safe API is Linux alone, as a read of each one's source shows. safeopen is not denied: a ban would name a preference."
+    sources:
+      - ".golangci.yml depguard row register-bans"
+      - "confine: os.Root called directly"
+  - item: "goreleaser"
+    why: "a library builds nothing: it releases with a tag and a changie entry and has no goreleaser config."
+    sources:
+      - ".changie.yaml"
+      - "CONTRIBUTING.md"
+  - item: "go-run, go-proc, go-socket, go-console (any of our own libraries)"
+    why: "go-files requires none of our repos; go-files is the bottom of the stack."
+    sources:
+      - "go.mod"
+  - item: "the dropped test libraries (gotest.tools, testify)"
+    why: "Tests use std testing. testscript (github.com/rogpeppe/go-internal/testscript) is not dropped: programs import it directly, and our libraries do not wrap it; go-files' own tests use std testing alone. (gofrs/flock, taken for a time, left go-files: lock calls the kernel's lock itself.)"
+    sources:
+      - "go.mod"
+  - item: "trust/home.go (132 lines): Home and an unowned read"
+    why: "not replaced by a library: it leaves go-files, and Home moves to the program that needs it. It is not a copy a library does, so it is no finding of this repo."
+    sources:
+      - "trust: Path and ReadOwned"
+findings:
+  - where: "lock/lock.go, lock/in.go, in_unix.go, in_other.go, process_unix.go, process_windows.go; Group, Mode, TakeIn, WaitIn, ErrNotTried, ErrNotPermitted, the pid liveness check, MkdirAll"
+    what: "a hand lock around flock with a pid file and a staleness check; TakeIn and WaitIn have no caller"
+    lines: "875 to about 105 (about 800 non-test lines of flock use; about 1,500 test lines)"
+    replaced_by:
+      - "std syscall.Flock, golang.org/x/sys/windows LockFileEx, crypto/sha256, errors.ErrUnsupported"
+    removed_by:
+      - "go-files-3"
+    sources:
+      - "commit d021297beee0a2f5240073b29b8f79a2b1968492"
+    symbol: "lock.Take, TakeIn, WaitIn, Group, Mode (old lock package, pid file and staleness check)"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit d021297beee0a2f5240073b29b8f79a2b1968492 put lock on the kernel's lock: lock/lock_unix.go:50 calls syscall.Flock on the lock's own descriptor and lock/lock_windows.go:58 locks through gofrs/flock. No lock/in*.go or process_*.go is left; TakeIn, WaitIn, Group, Mode, ErrNotTried and ErrNotPermitted are named only in lock/lock_test.go:293, the test that holds them dropped; lock.Take is the new one. A later change moved the Unix lock onto gofrs/flock too: lock/flock.go locks through it on every system lock builds on, and lock calls no Flock itself"
+  - where: "write/write.go (357), write/aside_unix.go, aside_windows.go, the stale-temp sweep, FollowLink"
+    what: "replace a file whole: the temp file, sync and rename recipe and its word match on error text"
+    lines: "658 to about 320"
+    replaced_by:
+      - "os.Root (Go 1.27)"
+      - "golang.org/x/sys v0.50.0 (unix and windows)"
+    removed_by:
+      - "go-files-4"
+    sources:
+      - "commit 8d52487d8b937af56cc40709c821b78d658b7a67"
+    symbol: "write.File (old recipe: temp file, sync, rename), aside_unix.go, aside_windows.go, the stale-temp sweep, FollowLink"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 8d52487d8b937af56cc40709c821b78d658b7a67 made write one recipe on os.Root. No write/aside_*.go is left, and no FollowLink or sweep is named in any file; write.File is the new one"
+  - where: "within module (all files), the raw Openat2 structures, RESOLVE_* constants and the eight sysnum_*.go tables"
+    what: "confinement written by hand: Create, List, Mkdir, Rmdir, Symlink, Unlink, OpenWith, NoMounts, the hard-link refusal, the recheck after open"
+    lines: "1,102 to about 142 (about 130 lines of syscall tables; 1,600 test lines)"
+    replaced_by:
+      - "os.Root (Go 1.27)"
+      - "golang.org/x/sys v0.50.0 (unix and windows)"
+    removed_by:
+      - "go-files-5"
+    sources:
+      - "commit 0f337b4fb6f2cb767b53462e7ab4d45cf1a6e841"
+    symbol: "Openat2, rawOpenat2, the RESOLVE_ constants, sysnum_*.go tables (old within module)"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 0f337b4fb6f2cb767b53462e7ab4d45cf1a6e841 opened and renamed in the kernel through x/sys. No sysnum_*.go or within.go is left, no rawOpenat2 or RESOLVE_ constant is named in any file, and the one unix.Openat2 is confine/open_linux.go:6, which the forbidigo row register confine-to-folder holds to confine's Linux files"
+  - where: "trust module: the walk, accounts, ACL readers, block.go, filesec.go, AccountOf, ReadFile, Want, Subject, Look, Who.Me, Who.Of, 55 exported names"
+    what: "trust walk and owner read with its own account and ACL readers"
+    lines: "1,868 to about 472"
+    replaced_by:
+      - "golang.org/x/sys v0.50.0 (unix and windows)"
+    removed_by:
+      - "go-files-6"
+    sources:
+      - "commit 57aa64e309b4d8b09e6d61e8dc97f8af7542bed1"
+    symbol: "trust walk: AccountOf, ReadFile, Want, Subject, Look, Who.Me, Who.Of, block.go, filesec.go"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 57aa64e309b4d8b09e6d61e8dc97f8af7542bed1 cut trust to Path and ReadOwned. No block.go or filesec.go is left; trust declares no AccountOf, ReadFile, Want, Subject, Look or Who method, and trust.Who stays as a struct of options"
+  - where: "trust/accounts/"
+    what: "group members read from /etc/group by a parser that reads a garbled gid as 0 (the case moby/sys/user fails the same way); getent and dscacheutil variants"
+    lines: "737 (deleted whole)"
+    replaced_by:
+      - "golang.org/x/sys v0.50.0 (unix and windows)"
+    removed_by:
+      - "go-files-6"
+    sources:
+      - "commit 57aa64e309b4d8b09e6d61e8dc97f8af7542bed1"
+      - ".golangci.yml depguard row register-bans (github.com/moby/sys/user)"
+    symbol: "package accounts: a /etc/group parser, getent and dscacheutil variants"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 57aa64e309b4d8b09e6d61e8dc97f8af7542bed1 deleted trust/accounts whole; no /etc/group, getent or dscacheutil is named in any Go file, and depguard row register-bans denies github.com/moby/sys/user in every file"
+  - where: "write/keep.go (231) and keep_unix_test.go (428)"
+    what: "the old dated copy and put-back (keep.go 231, its test 428): cut to Keep and PutBack, about 60 lines, which stay in go-files; the rest of the old file goes"
+    lines: "659 in the old module to about 60 (no line ranges are given by any source)"
+    replaced_by:
+      - "os.Root (Go 1.27)"
+    removed_by:
+      - "go-files-4"
+    sources:
+      - "commit 8d52487d8b937af56cc40709c821b78d658b7a67"
+    symbol: "Keep, PutBack (the old keep.go: a dated copy before a replace)"
+    state: "closed"
+    note: "cut at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 8d52487d8b937af56cc40709c821b78d658b7a67 cut write/keep.go to 95 lines, Keep and PutBack, which stay by design; no keep_unix_test.go is left"
+  - cut: true
+    where: "lock/lock.go:1-355 (cut to about 75), lock/in.go (394), in_other.go (37), process_unix.go (26), process_windows.go (20)"
+    what: "Group, Mode, TakeIn, WaitIn, ErrNotPermitted, ErrNotPlain, ErrNotTried, ErrOutside, the pid liveness check and the MkdirAll of the folder: deleted with no alias; nothing replaces them"
+    lines: null
+    symbol: "Group, Mode, TakeIn, WaitIn, ErrNotPermitted, ErrNotPlain, ErrNotTried, ErrOutside"
+    removed_by:
+      - "go-files-3"
+    sources:
+      - "commit d021297beee0a2f5240073b29b8f79a2b1968492"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit d021297beee0a2f5240073b29b8f79a2b1968492 deleted them with no alias; lock declares none of them, and lock/lock_test.go:293 holds each dropped. confine.ErrOutside and trust.ErrNotPlain are other packages' own names"
+  - cut: true
+    where: "write/write.go (357 lines, cut to about 143), write/keep.go (231, cut to about 60)"
+    what: "FollowLink, write.ErrOutside, the stale-temp sweep, the word match on error text, and the own open, stat and rename seams"
+    lines: null
+    symbol: "FollowLink, ErrOutside, sweep"
+    removed_by:
+      - "go-files-4"
+    sources:
+      - "commit 8d52487d8b937af56cc40709c821b78d658b7a67"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 8d52487d8b937af56cc40709c821b78d658b7a67 deleted them with no alias; no FollowLink or sweep is named in any file, and write declares no ErrOutside"
+  - cut: true
+    where: "confine/within.go (348, cut to about 33), kernel_other.go, shared_other.go, shared_unix.go, shared_windows.go, the eight sysnum_linux_*.go files"
+    what: "Create, List, Mkdir, Rmdir, Symlink, Unlink, OpenWith, NoMounts, Option, the hard-link refusal and the after-open recheck"
+    lines: null
+    symbol: "Create, List, Mkdir, Rmdir, Symlink, Unlink, OpenWith, NoMounts, Option"
+    removed_by:
+      - "go-files-5"
+    sources:
+      - "commit 0f337b4fb6f2cb767b53462e7ab4d45cf1a6e841"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 0f337b4fb6f2cb767b53462e7ab4d45cf1a6e841 deleted them with no alias; confine exports Close, ErrNoExchange, ErrOutside, Local, NoLinks, Open, RenameExchange and RenameNoReplace, no within.go, kernel_other.go, shared_other.go or sysnum file is left, and shared_unix.go and shared_windows.go stay as confine's own"
+  - cut: true
+    where: "trust/trust.go (412, cut to about 190), read.go (143), read_unix.go (42), acl_darwin.go, acl_unix.go, block.go, filesec.go, root.go, stat_other.go, read_other.go, trust/wiring/"
+    what: "AccountOf, ReadFile, Want, Subject, Look, Who.Me, Who.Of, the exported Stat and Ends: 55 exported names in all"
+    lines: null
+    symbol: "AccountOf, ReadFile, Want, Subject, Look, Stat, Ends"
+    removed_by:
+      - "go-files-6"
+    sources:
+      - "commit 57aa64e309b4d8b09e6d61e8dc97f8af7542bed1"
+    state: "closed"
+    note: "gone at 854284ae3a36ea2ff01665b0943aa0944620ec0a: commit 57aa64e309b4d8b09e6d61e8dc97f8af7542bed1 deleted them with no alias; trust declares no AccountOf, ReadFile, Want, Subject, Look, Stat or Ends, and no block.go, filesec.go, root.go or trust/wiring is left"
+blockers:
+  - ticket: "go-files-2"
+    why: "the import ticket: the four packages arrive as they are and go-files's own configs land; bans are written against that tree"
+  - ticket: "go-files-1"
+    why: "the Windows probe verdict decides whether lock_windows.go imports gofrs/flock or writes LockFileEx itself (go-files-3), so the path-lock ban waits on it"
+  - ticket: "go-files-3"
+    why: "removes the last hand lock (lock.go, in*.go, process_*.go): path-lock ban and the Flock forbidigo row"
+  - ticket: "go-files-4"
+    why: "removes the old write recipe and keep/aside/sweep: atomic-write ban"
+  - ticket: "go-files-5"
+    why: "removes the within module and the raw openat2 tables: confine ban and the unix.Openat2/Renameat2 forbidigo row"
+  - ticket: "go-files-6"
+    why: "removes accounts and the old trust walk: file-owner-and-mode ban"
+  - ticket: "go-files-7"
+    why: "adds appdirs: app-folders ban and the os.UserConfigDir forbidigo row (no old copy to remove)"
+notes:
+  - "go-files is a library: its findings are the old module's copies that the go-files tickets cut. Programs' copies of the same jobs are the programs' findings."
+  - "The five go-files packages are first-party picks of every program, not of go-files itself; they are listed in each program matrix as first-party:go-files/<pkg>."
+  - "Package names after the renames: confine (was within), appdirs (was paths). Ticket bodies still say within and paths."
+  - "No source gives line ranges for the old module files; each `where` names the files and symbols the go-files ticket moves or cuts. trust/home.go leaves go-files (not-for row)."
+  - "Each finding is closed: its ticket landed before this file was written, and its note says where the code went at 854284ae3a36ea2ff01665b0943aa0944620ec0a. A closed finding stays one release as the record."
+  - "Each call the matrix gave as prose is in its pick's pattern: a hand /etc/group parser (x/sys), a hand flock or LockFileEx and a pid file (gofrs/flock), an import of lock, trust or appdirs from write or confine (the link test)."
+  - "The forbidigo row register path-lock excepts write's two system files by file, because Append holds its log on its own descriptor and write may import only the standard library and golang.org/x/sys (the link test). A third file that takes a lock is red. The two holdShared test helpers (write/helper_unix_test.go, write/helper_windows_test.go) carry a per-call nolint."
+  - "A published matrix of the library's picks is generated from this file."
+  - "Each ban states its security or correctness reason, in its pick's ban and in its .golangci.yml desc or msg. A library whose ban would name only a preference is not denied: github.com/hectane/go-acl, github.com/google/safeopen, github.com/kirsle/configdir and github.com/adrg/xdg, nor are os.UserConfigDir, os.UserCacheDir and os.UserHomeDir. The four atomic writers and the two joiners were read in source, and each showed the gap its ban names. go-filemutex and juju/fslock stay denied for security: each, read in source, opens the lock's name following a link and locks it by hand."

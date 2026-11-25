@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="t d">
+  <title id="t">go-files</title>
+  <desc id="d">A page, its folded corner in coral.</desc>
+  <rect width="256" height="256" rx="56" fill="#FFF6EC"/><g transform="translate(128 128) scale(1.6) translate(-180 -148)"><path d="M152 106 H186 L208 128 V190 H152 Z" fill="none" stroke="#22264A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/><path d="M186 106 V128 H208" fill="none" stroke="#E8735A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/><path d="M166 152 H194 M166 170 H194" fill="none" stroke="#22264A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></g>
+</svg>
