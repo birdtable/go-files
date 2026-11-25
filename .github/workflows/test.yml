@@ -88,7 +88,9 @@ jobs:
           go test -json $race -shuffle=on -count=1 ./... > "$RUNNER_TEMP/go-test.json"
       # Counts the passed, failed and skipped tests into the log and the job summary, prints each
       # failed or skipped test's own output, and is red on any failure and on any skip: a test that
-      # skips on a runner proves nothing there.
+      # skips on a runner proves nothing there. A package that fails with no test failed crashed or
+      # timed out (a panic, an exit, the -timeout), and says why in its own output or in the output
+      # of the test it started and never ended, so for a failed package it prints those too.
       - name: test counts
         if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
         env:
@@ -102,6 +104,10 @@ jobs:
           jq -R -n -r '[inputs | fromjson? | select(.Test != null)] as $e
             | ($e | map(select(.Action == "fail" or .Action == "skip") | .Package + " " + .Test)) as $bad
             | $e[] | select(.Action == "output") | select((.Package + " " + .Test) as $k | any($bad[]; . == $k)) | .Output' "$events" | tr -d '\r'
+          jq -R -n -j '[inputs | fromjson?] as $e
+            | ([$e[] | select(.Test == null and .Action == "fail") | {key: .Package, value: true}] | from_entries) as $failed
+            | ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "fail" or .Action == "skip")) | {key: (.Package + " " + .Test), value: true}] | from_entries) as $ended
+            | $e[] | select(.Action == "output" and $failed[.Package] == true and (.Test == null or $ended[.Package + " " + .Test] != true)) | .Output' "$events" | tr -d '\r'
           jq -R -n -r '[inputs | fromjson? | select(.Test == null and .Action == "fail")] | .[] | "FAIL " + .Package' "$events" | tr -d '\r'
           line="tests: $passed passed, $failed failed, $skipped skipped (race $GO_TEST_RACE)"
           echo "$line"
