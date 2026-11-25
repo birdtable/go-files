@@ -46,9 +46,24 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # GOFLAGS=-mod=mod would let go vet and go test pass on a go.mod or go.sum that is not tidy, so
-      # this step fails first on any change go mod tidy would make, and prints it.
+      # this step fails first on any change go mod tidy would make, and prints it. It checks the
+      # root go.mod and each tools/*.mod the task tooling runs through, prints every file's change
+      # before it fails, and fails when no tools file is found.
       - name: go mod tidy
-        run: go mod tidy -diff
+        run: |
+          status=0
+          go mod tidy -diff || status=1
+          found=0
+          for modfile in tools/*.mod; do
+            [ -f "$modfile" ] || continue
+            found=$((found + 1))
+            go mod tidy -diff -modfile="$modfile" || { echo "not tidy: $modfile" >&2; status=1; }
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "no tools/*.mod found" >&2
+            status=1
+          fi
+          exit "$status"
       - name: go vet
         run: go vet ./...
       # go test runs as the release tier runs it, with the race detector, in shuffled order and never
@@ -61,12 +76,10 @@ jobs:
             race=
           fi
           echo "GO_TEST_RACE=${race:-off}" >> "$GITHUB_ENV"
-          # These four run the repo's own task tooling through tools/*.mod, which can't resolve from the public proxy until those modules have public tags (#4).
-          go test -json $race -shuffle=on -count=1 -skip '^(TestATestSkippedIsRed|TestATierTimesItselfWhateverTheEnvironmentSays|TestBudgetFailsALateTierButACommitOrPushStartedAboveLoad15|TestTwoRunsOfATierInOneTreeEachTimeThemselves)$' ./... > "$RUNNER_TEMP/go-test.json"
+          go test -json $race -shuffle=on -count=1 ./... > "$RUNNER_TEMP/go-test.json"
       # Counts the passed, failed and skipped tests into the log and the job summary, prints each
       # failed or skipped test's own output, and is red on any failure and on any skip: a test that
-      # skips on a runner proves nothing there. The names -skip leaves out never run, so they never
-      # count as skipped.
+      # skips on a runner proves nothing there.
       - name: test counts
         if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
         env:

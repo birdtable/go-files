@@ -7,7 +7,7 @@ toolchain go1.27.4
 tool github.com/go-task/task/v3/cmd/task
 
 require (
-	github.com/birdtable/go-testkit v0.2.0
+	github.com/birdtable/go-testkit v0.3.1
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.42.0
 )

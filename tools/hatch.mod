@@ -7,18 +7,25 @@ toolchain go1.27.4
 tool github.com/birdtable/hatch/cmd/hatch
 
 require (
-	github.com/birdtable/go-testkit v0.2.0
-	golang.org/x/sys v0.49.0
+	github.com/birdtable/go-testkit v0.3.1
+	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.44.0
 )
 
 require (
-	github.com/birdtable/go-proc v0.4.0 // indirect
-	github.com/birdtable/hatch v0.2.0 // indirect
+	github.com/birdtable/go-proc v0.16.0 // indirect
+	github.com/birdtable/hatch v0.7.0 // indirect
+	github.com/bitfield/gotestdox v0.2.2 // indirect
 	github.com/ebitengine/purego v0.11.2 // indirect
+	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.10 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
+	gotest.tools/gotestsum v1.13.0 // indirect
 )
