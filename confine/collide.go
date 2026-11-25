@@ -20,12 +20,15 @@ const opCollide = "collide"
 // Each name is looked at with no link followed. Both there and the same file is true, both there
 // and two files is false, and one there with the other not is false, but only where a second look
 // at a and at b agrees with the first: a file made or removed at a between the looks, another
-// call's probe among them, is seen at one of two names a volume folds and not at the other. Where
-// a look changed, it looks again from the start; where the folder changes under three tries, it
-// answers true, taking names it cannot tell apart for one. Where neither is there, a is made,
-// empty and the owner's alone, b is looked at, and a is removed again. The probe is held open
-// until after the remove, so no file put at a or b takes its file ID; a file put at a by another is
-// left only up to the last instant: no call removes by file ID, so a look then a remove.
+// call's probe among them, is seen at one of two names a volume folds and not at the other. Where a
+// look changed, it looks again from the start; where the folder changes under three tries, it
+// answers true, taking names it cannot tell apart for one. One race is left: a file at a moved
+// away, back and away again within one call, each move between two of its four looks, is answered
+// apart, and a new file given the old one's file ID can stand in for the move back. Where neither
+// is there, a is made, empty and the owner's alone, b is looked at, and a is removed again. The
+// probe is held open until after the remove, so no file put at a or b takes its file ID; a file put
+// at a by another is left only up to the last instant: no call removes by file ID, so a look then a
+// remove.
 //
 // It refuses, with an *fs.PathError matching ErrOutside, a name that is not one name in the
 // folder: empty, ., .., or one holding a separator.
