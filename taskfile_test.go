@@ -727,7 +727,7 @@ func TestTwoRunsOfATierInOneTreeEachTimeThemselves(t *testing.T) {
 // Taskfile.yml's env has every cmd, where taskProgram's task is built with cgo on. A run of
 // pre-push whose step builds either counts that build in its CPU time, and on a cold build cache,
 // with tests building it at once, runs past a hang guard of 10 s.
-var pushTools struct {
+var pushTools struct { //nolint:gochecknoglobals // the test binary builds pre-push's tools once, for every test that runs pre-push
 	once sync.Once
 	err  error
 }
