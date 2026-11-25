@@ -73,7 +73,7 @@ This is `ExampleFile` in [write/example_test.go](write/example_test.go), so `go 
 |---|---|
 | [`write`](write/README.md) | Replaces a file whole, keeps a log under a cap, keeps a copy and puts it back, and swaps in a new copy of a program that may be running. |
 | [`lock`](lock/README.md) | Keeps two runs of one program apart, and tells the second who holds the lock. |
-| [`confine`](confine/README.md) | Opens, makes, lists, renames and copies files named by untrusted input inside one folder, following no link. |
+| [`confine`](confine/README.md) | Opens, makes, lists, renames and copies files named by untrusted input inside one folder, following no link, and tells how a folder reads names. |
 | [`nowait`](nowait/README.md) | Opens a path as `os.OpenFile` does, but never waits for a pipe's other end. |
 | [`splice`](splice/README.md) | Replaces the text between two marker lines, as a pure function over bytes. |
 | [`trust`](trust/README.md) | Checks that no other account can change a program, a key or a file before you run or read it. |
