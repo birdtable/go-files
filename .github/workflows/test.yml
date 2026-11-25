@@ -114,12 +114,15 @@ jobs:
       # called alone is not a tier, so no wall-clock budget is timed: on a hosted runner it would
       # measure the runner, not the code. Each runs whatever the steps before it did, and writes its
       # own pass or fail line to the job summary.
+      # A member that reads only the tree skips on a stamp and checksum under .task/ that match the
+      # tree, and a skip exits 0, so each member here runs with --force: whatever .task/ holds, the
+      # check runs. TestNoTaskStateIsTracked, in go test above, fails on any tracked file under .task/.
       # lint is golangci-lint with .golangci.yml for linux, darwin, windows, freebsd and netbsd,
       # and the depguard plants that hold the layer rows.
       - name: lint
         if: ${{ !cancelled() }}
         run: |
-          if go tool -modfile=tools/task.mod task lint; then result=pass; else result=fail; fi
+          if go tool -modfile=tools/task.mod task --force lint; then result=pass; else result=fail; fi
           echo "lint: $result" | tee -a "$GITHUB_STEP_SUMMARY"
           [ "$result" = pass ]
       # api holds the three systems' surfaces to api/systems.txt, the breaks since the last tag to
@@ -127,13 +130,13 @@ jobs:
       - name: api
         if: ${{ !cancelled() }}
         run: |
-          if go tool -modfile=tools/task.mod task api; then result=pass; else result=fail; fi
+          if go tool -modfile=tools/task.mod task --force api; then result=pass; else result=fail; fi
           echo "api: $result" | tee -a "$GITHUB_STEP_SUMMARY"
           [ "$result" = pass ]
       # vuln is govulncheck over the module, against the Go vulnerability database as it is today.
       - name: vuln
         if: ${{ !cancelled() }}
         run: |
-          if go tool -modfile=tools/task.mod task vuln; then result=pass; else result=fail; fi
+          if go tool -modfile=tools/task.mod task --force vuln; then result=pass; else result=fail; fi
           echo "vuln: $result" | tee -a "$GITHUB_STEP_SUMMARY"
           [ "$result" = pass ]
