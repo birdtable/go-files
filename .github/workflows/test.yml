@@ -1,14 +1,23 @@
-# Runs go vet and go test on GitHub's hosted runners, on Linux, macOS and Windows, for every pull
-# request, every push to main, and by hand. It holds no secret, and its token reads the repository's
-# contents alone. Every module is fetched through the public Go module proxy, as a program that
-# imports go-files fetches them, and nothing is kept in the Actions cache.
+# Runs go vet, go test, lint, the API check and the vulnerability check on GitHub's hosted runners:
+# on Linux and Windows for every pull request, and on Linux, Windows and macOS for every push to
+# main, every v* tag, and by hand. The hosted macOS runners are a small pool shared across the
+# organisation, so a pull request does not wait on one; main and each tag still get all three
+# systems. A newer run for the same ref cancels the older one, which frees its runners. A macOS job
+# cancelled with no runner (no runner name, no step run) is rerun. It holds no secret, and its token
+# reads the repository's contents alone. Every module is fetched through the public Go module
+# proxy, as a program that imports go-files fetches them, and nothing is kept in the Actions cache.
 name: test
 
 on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -18,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest", "windows-latest"]') || fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -31,8 +40,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The contract test reads the last release tag and the files it holds, so the checkout
-          # fetches the whole history and its tags, not one commit.
+          # The contract test and the API check read the last release tag and the files it holds, so
+          # the checkout fetches the whole history and its tags, not one commit.
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -79,7 +88,9 @@ jobs:
           go test -json $race -shuffle=on -count=1 ./... > "$RUNNER_TEMP/go-test.json"
       # Counts the passed, failed and skipped tests into the log and the job summary, prints each
       # failed or skipped test's own output, and is red on any failure and on any skip: a test that
-      # skips on a runner proves nothing there.
+      # skips on a runner proves nothing there. A package that fails with no test failed crashed or
+      # timed out (a panic, an exit, the -timeout), and says why in its own output or in the output
+      # of the test it started and never ended, so for a failed package it prints those too.
       - name: test counts
         if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
         env:
@@ -93,6 +104,10 @@ jobs:
           jq -R -n -r '[inputs | fromjson? | select(.Test != null)] as $e
             | ($e | map(select(.Action == "fail" or .Action == "skip") | .Package + " " + .Test)) as $bad
             | $e[] | select(.Action == "output") | select((.Package + " " + .Test) as $k | any($bad[]; . == $k)) | .Output' "$events" | tr -d '\r'
+          jq -R -n -j '[inputs | fromjson?] as $e
+            | ([$e[] | select(.Test == null and .Action == "fail") | {key: .Package, value: true}] | from_entries) as $failed
+            | ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "fail" or .Action == "skip")) | {key: (.Package + " " + .Test), value: true}] | from_entries) as $ended
+            | $e[] | select(.Action == "output" and $failed[.Package] == true and (.Test == null or $ended[.Package + " " + .Test] != true)) | .Output' "$events" | tr -d '\r'
           jq -R -n -r '[inputs | fromjson? | select(.Test == null and .Action == "fail")] | .[] | "FAIL " + .Package' "$events" | tr -d '\r'
           line="tests: $passed passed, $failed failed, $skipped skipped (race $GO_TEST_RACE)"
           echo "$line"
@@ -100,3 +115,34 @@ jobs:
           if [ "$TEST_OUTCOME" != success ] || [ "$failed" -ne 0 ] || [ "$skipped" -ne 0 ] || [ "$passed" -eq 0 ]; then
             exit 1
           fi
+      # Lint, the API check and the vulnerability check run through the repository's own task
+      # tooling, each as its own task member, so CI and the local tiers run the same checks. A member
+      # called alone is not a tier, so no wall-clock budget is timed: on a hosted runner it would
+      # measure the runner, not the code. Each runs whatever the steps before it did, and writes its
+      # own pass or fail line to the job summary.
+      # A member that reads only the tree skips on a stamp and checksum under .task/ that match the
+      # tree, and a skip exits 0, so each member here runs with --force: whatever .task/ holds, the
+      # check runs. TestNoTaskStateIsTracked, in go test above, fails on any tracked file under .task/.
+      # lint is golangci-lint with .golangci.yml for linux, darwin, windows, freebsd and netbsd,
+      # and the depguard plants that hold the layer rows.
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: |
+          if go tool -modfile=tools/task.mod task --force lint; then result=pass; else result=fail; fi
+          echo "lint: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$result" = pass ]
+      # api holds the three systems' surfaces to api/systems.txt, the breaks since the last tag to
+      # api/breaks/<tag>.txt, and api/marks.txt to go doc. It reads the whole history checked out above.
+      - name: api
+        if: ${{ !cancelled() }}
+        run: |
+          if go tool -modfile=tools/task.mod task --force api; then result=pass; else result=fail; fi
+          echo "api: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$result" = pass ]
+      # vuln is govulncheck over the module, against the Go vulnerability database as it is today.
+      - name: vuln
+        if: ${{ !cancelled() }}
+        run: |
+          if go tool -modfile=tools/task.mod task --force vuln; then result=pass; else result=fail; fi
+          echo "vuln: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$result" = pass ]

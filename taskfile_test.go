@@ -3,6 +3,7 @@ package gofiles_test
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -368,6 +369,36 @@ func git(t *testing.T, dir string, cmd *exec.Cmd) {
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s in %s: %v:\n%s", strings.Join(cmd.Args, " "), dir, err, out.String())
+	}
+}
+
+// TestNoTaskStateIsTracked fails when git tracks a file under .task/, in the index or in a commit.
+// go-task keeps there the checksum and the stamp that let a member skip, and a skip exits 0, so a
+// tracked .task/ comes with every checkout and reports a check that never ran on it as passed.
+// .gitignore leaves .task/ out, so only a forced add brings one in. Where git reads no repository
+// here, a tree from the module cache or a tarball, nothing is tracked, and it passes.
+//
+// What it costs when this fails: a pull request that forces a .task/ in turns lint, vuln and the
+// other members that skip into passes for code they never read, wherever a member is not forced.
+func TestNoTaskStateIsTracked(t *testing.T) {
+	t.Parallel()
+	repo := exec.CommandContext(t.Context(), "git", "rev-parse", "--git-dir")
+	isolate(repo)
+	if out, err := repo.CombinedOutput(); err != nil {
+		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {
+			t.Logf("git reads no repository here, so it tracks nothing: %s", bytes.TrimSpace(out))
+			return
+		}
+		t.Fatalf("git rev-parse --git-dir: %v", err)
+	}
+	ls := exec.CommandContext(t.Context(), "git", "ls-files", "--", ".task")
+	isolate(ls)
+	out, err := ls.Output()
+	if err != nil {
+		t.Fatalf("git ls-files -- .task: %v", err)
+	}
+	if len(bytes.TrimSpace(out)) > 0 {
+		t.Fatalf("git tracks go-task's state under .task/, which only a run may write: a stamp in a checkout makes a member skip and pass unrun. Take it out of the index with git rm --cached:\n%s", out)
 	}
 }
 
