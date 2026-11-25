@@ -1,5 +1,5 @@
-# Runs go vet and go test on GitHub's hosted runners, on Linux, macOS and Windows, for every pull
-# request, every push to main, and by hand. It holds no secret, and its token reads the repository's
+# Runs go vet, go test, lint, the API check and the vulnerability check on GitHub's hosted runners,
+# on Linux, macOS and Windows, for every pull request, every push to main, and by hand. It holds no secret, and its token reads the repository's
 # contents alone. Every module is fetched through the public Go module proxy, as a program that
 # imports go-files fetches them, and nothing is kept in the Actions cache.
 name: test
@@ -31,8 +31,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The contract test reads the last release tag and the files it holds, so the checkout
-          # fetches the whole history and its tags, not one commit.
+          # The contract test and the API check read the last release tag and the files it holds, so
+          # the checkout fetches the whole history and its tags, not one commit.
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -100,3 +100,31 @@ jobs:
           if [ "$TEST_OUTCOME" != success ] || [ "$failed" -ne 0 ] || [ "$skipped" -ne 0 ] || [ "$passed" -eq 0 ]; then
             exit 1
           fi
+      # Lint, the API check and the vulnerability check run through the repository's own task
+      # tooling, each as its own task member, so CI and the local tiers run the same checks. A member
+      # called alone is not a tier, so no wall-clock budget is timed: on a hosted runner it would
+      # measure the runner, not the code. Each runs whatever the steps before it did, and writes its
+      # own pass or fail line to the job summary.
+      # lint is golangci-lint with .golangci.yml for linux, darwin, windows, freebsd and netbsd,
+      # and the depguard plants that hold the layer rows.
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: |
+          if go tool -modfile=tools/task.mod task lint; then result=pass; else result=fail; fi
+          echo "lint: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$result" = pass ]
+      # api holds the three systems' surfaces to api/systems.txt, the breaks since the last tag to
+      # api/breaks/<tag>.txt, and api/marks.txt to go doc. It reads the whole history checked out above.
+      - name: api
+        if: ${{ !cancelled() }}
+        run: |
+          if go tool -modfile=tools/task.mod task api; then result=pass; else result=fail; fi
+          echo "api: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$result" = pass ]
+      # vuln is govulncheck over the module, against the Go vulnerability database as it is today.
+      - name: vuln
+        if: ${{ !cancelled() }}
+        run: |
+          if go tool -modfile=tools/task.mod task vuln; then result=pass; else result=fail; fi
+          echo "vuln: $result" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$result" = pass ]
