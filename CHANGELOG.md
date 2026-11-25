@@ -7,7 +7,7 @@ What each release of go-files changed. Made by changie from the files in .change
 
 v0.17.0 adds one function to `confine`, `Folds`, which answers how a folder reads names, whether it takes two that differ only in case or in Unicode composition for one, by asking the system and writing nothing, with the type `Folding` and the error `ErrNoFolding`. No exported name is removed, moved or changed.
 
-Each release is proved by its release checks, `task release`, run at the release's commit on three systems: macOS, Linux and Windows.
+The full release checks, `task release`, ran on macOS at the tagged commit. On Linux, macOS and Windows, the test workflow ran at the tagged commit in CI: go vet, the tests with the race detector, lint, the API check and the vulnerability check. No full release checks ran on Linux or Windows for this release.
 
 ### Added
 
@@ -29,7 +29,7 @@ go-files v0.17.0 requires golang.org/x/sys v0.50.0, golang.org/x/text v0.44.0 an
 
 v0.16.2 fixes one security defect, GHSA-5j6g-3rm2-q3r8: `confine.Collide` could answer that two names are apart when a file made or removed at one of them, another call's probe among them, fell between its looks at the two. The rest of the release is the repository's own CI and tooling. No exported name is added, removed, moved or changed.
 
-Each release is proved by its release checks, `task release`, run at the release's commit on three systems: macOS, Linux and Windows.
+On Linux, macOS and Windows, the test workflow ran at the tagged commit in CI: go vet, the tests with the race detector, lint, the API check and the vulnerability check. No full release checks ran for this release. The pre-push tier ran on macOS on the tagged tree.
 
 ### Added
 
@@ -42,7 +42,7 @@ Each release is proved by its release checks, `task release`, run at the release
 
 ### Removed
 
-- The release workflow, .github/workflows/release.yml, which ran only by hand. Each release is still proved by its release checks, run at the release's commit on macOS, Linux and Windows.
+- The release workflow, .github/workflows/release.yml, which ran only by hand. Each release is proved by the test workflow at its commit on Linux, macOS and Windows, and the release notes say what else ran.
 
 ### Security
 
