@@ -1,4 +1,7 @@
-module github.com/birdtable/go-files
+// hatch imports go-files' trust and treesum packages, so this file names a module of its own: go
+// tool builds hatch against the published go-files required below, never against the tree it
+// checks, and a planted tree with no go-files source still builds it.
+module github.com/birdtable/go-files/tools
 
 go 1.27.1
 
@@ -7,6 +10,7 @@ toolchain go1.27.4
 tool github.com/birdtable/hatch/cmd/hatch
 
 require (
+	github.com/birdtable/go-files v0.16.1
 	github.com/birdtable/go-testkit v0.3.1
 	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.44.0

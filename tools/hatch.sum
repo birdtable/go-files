@@ -1,3 +1,5 @@
+github.com/birdtable/go-files v0.16.1 h1:fHxpns0aip64Dxiu3HSx1y6rrz97bGwt69oPAovMdaY=
+github.com/birdtable/go-files v0.16.1/go.mod h1:Shx2v2nWwFH711+HctoTSjSDfIW9xnGooob2uZrml+o=
 github.com/birdtable/go-proc v0.16.0 h1:3dRIfYgyIqa+yEfTA6B/23ynovmqtSqJVsk+aBW3bbs=
 github.com/birdtable/go-proc v0.16.0/go.mod h1:U6Z/Sg30UrLzTn9TCM7PxXFo3nTpP5+y3HSSnx4eQrA=
 github.com/birdtable/go-testkit v0.3.1 h1:ochpuiBPj29SIwpVeYqNWOfkxef0nlWREzKcgM3N6DU=
