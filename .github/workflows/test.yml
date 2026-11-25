@@ -31,6 +31,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The contract test reads the last release tag and the files it holds, so the checkout
+          # fetches the whole history and its tags, not one commit.
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -42,6 +45,10 @@ jobs:
       - name: allow unprivileged user namespaces
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # GOFLAGS=-mod=mod would let go vet and go test pass on a go.mod or go.sum that is not tidy, so
+      # this step fails first on any change go mod tidy would make, and prints it.
+      - name: go mod tidy
+        run: go mod tidy -diff
       - name: go vet
         run: go vet ./...
       # go test runs as the release tier runs it, with the race detector, in shuffled order and never

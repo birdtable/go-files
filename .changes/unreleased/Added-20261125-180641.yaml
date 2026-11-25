@@ -1,0 +1,3 @@
+kind: Added
+body: A test workflow, .github/workflows/test.yml, runs go vet and go test with the race detector on GitHub's hosted Linux, macOS and Windows runners for every pull request and every push to main, prints the passed, failed and skipped counts, and is red on any failure or skip. Four tests that run the repository's own tooling are skipped there until the tools' modules resolve from the public module proxy (#4).
+time: 2026-11-25T18:06:41.302196+01:00
