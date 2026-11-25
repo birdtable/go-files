@@ -223,12 +223,14 @@ func TestCollideAnswersAsTheFolderReadsWhatChangesBetweenItsLooks(t *testing.T) 
 }
 
 // Collide raced by itself: calls on one folder at once, each one's probe coming and going between
-// the others' looks, answer as the folder reads Fold and fold, or say why they cannot. None
-// answers apart where the volume folds them, nor one where it does not.
+// the others' looks. Where the volume folds Fold and fold, no call answers apart. Where it does
+// not, a call whose three tries each saw the folder change answers one name, the fail-closed
+// answer, and that is allowed; but some call answers apart, as the folder reads them.
 //
 // What it costs when this fails: two goroutines asking Collide of one folder at once, as a tool
 // checking names in parallel does, are told now and then that names the volume takes for one are
-// two.
+// two; or, where the volume folds nothing, every raced call says one name, and Collide tells the
+// folder nothing.
 func TestCollideRacedByItselfAnswersAsTheFolderReads(t *testing.T) {
 	t.Parallel()
 	want := folds(t, "Fold", "fold")
@@ -236,7 +238,7 @@ func TestCollideRacedByItselfAnswersAsTheFolderReads(t *testing.T) {
 	root := openRoot(t, dir)
 	const callers, calls = 8, 200
 	var mu sync.Mutex
-	answered, wrong := 0, 0
+	answered, closed, wrong := 0, 0, 0
 	var refused []error
 	var wg sync.WaitGroup
 	for i := range callers {
@@ -251,8 +253,10 @@ func TestCollideRacedByItselfAnswersAsTheFolderReads(t *testing.T) {
 				switch {
 				case err != nil:
 					refused = append(refused, err)
-				case got != want:
+				case want && !got:
 					wrong++
+				case !want && got:
+					closed++
 				default:
 					answered++
 				}
@@ -262,10 +266,14 @@ func TestCollideRacedByItselfAnswersAsTheFolderReads(t *testing.T) {
 	}
 	wg.Wait()
 	if wrong != 0 {
-		t.Errorf("%d of %d calls answered %v, where the folder folds Fold and fold: %v", wrong, callers*calls, !want, want)
+		t.Errorf("%d of %d calls answered apart, where the folder folds Fold and fold", wrong, callers*calls)
 	}
 	if answered == 0 {
-		t.Errorf("no call of %d answered, and each gave an error: %v", callers*calls, errors.Join(refused...))
+		t.Errorf("no call of %d answered %v, as the folder reads Fold and fold; %d answered one name, and the rest gave an error: %v",
+			callers*calls, want, closed, errors.Join(refused...))
+	}
+	if closed > 0 {
+		t.Logf("%d of %d calls answered one name, where the folder does not fold Fold and fold: each saw it change under three tries", closed, callers*calls)
 	}
 	if len(refused) > 0 {
 		t.Logf("%d of %d calls gave an error, the first: %v", len(refused), callers*calls, refused[0])
