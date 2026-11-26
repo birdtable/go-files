@@ -54,10 +54,10 @@ func TestDarwinVolumeRule(t *testing.T) {
 }
 
 // What the File Provider's marks say of a path on macOS, held on every system: a file the provider
-// evicted, or the domain's mark or a com.apple.fileprovider. attribute on the path or any folder
-// above it, is marked, before any other answer; a folder whose attributes cannot be listed, or a
-// CloudStorage or Mobile Documents folder in a Library folder, with no mark, cannot be told; any
-// other path is none, its every folder up to / asked.
+// evicted, or an attribute the domain's mark or com.apple.fileprovider. leads, on the path or any
+// folder above it, is marked, before any other answer; a folder whose attributes cannot be listed,
+// or a CloudStorage or Mobile Documents folder in a Library folder, in any case, with no mark,
+// cannot be told; any other path is none, its every folder up to / asked.
 //
 // What it costs when this fails: a folder in iCloud Drive or a third-party File Provider domain,
 // whose files the provider may evict, is answered as a plain APFS folder, so Local.
@@ -68,6 +68,7 @@ func TestDarwinSyncRule(t *testing.T) {
 		"/Users/a/Library/Mobile Documents":                       {"com.apple.file-provider-domain-id"},
 		"/Users/a/Library/Mobile Documents/com~apple~CloudDocs/b": {"com.apple.FinderInfo"},
 		"/Users/a/Booking":     {"com.apple.fileprovider.dir#N"},
+		"/Users/a/Domain":      {"com.apple.file-provider-domain-id#PN"},
 		"/Users/a/Documents":   {"com.apple.FinderInfo", "com.apple.metadata:kMDItemWhereFroms"},
 		"/Users/a/Downloads/f": {"com.apple.fileprovider.fpfs#P"},
 	}
@@ -80,10 +81,15 @@ func TestDarwinSyncRule(t *testing.T) {
 		{"/Users/a/Library/Mobile Documents", false, appdirs.SyncMarked},
 		{"/Users/a/Library/Mobile Documents/com~apple~CloudDocs/b/data", false, appdirs.SyncMarked},
 		{"/Users/a/Booking/data", false, appdirs.SyncMarked},
+		{"/Users/a/Domain/data", false, appdirs.SyncMarked},
 		{"/Users/a/Downloads/f", false, appdirs.SyncMarked},
 		{"/Users/a/Library/Application Support/app", true, appdirs.SyncMarked},
 		{"/Users/a/Library/CloudStorage/Dropbox/data", false, appdirs.SyncCannotTell},
 		{"/Users/a/Library/CloudStorage", false, appdirs.SyncCannotTell},
+		{"/Users/a/library/CloudStorage/Dropbox/data", false, appdirs.SyncCannotTell},
+		{"/Users/a/library/cloudstorage/Dropbox/data", false, appdirs.SyncCannotTell},
+		{"/Users/a/library/Mobile Documents/x/data", false, appdirs.SyncCannotTell},
+		{"/Users/a/LIBRARY/mobile documents/x/data", false, appdirs.SyncCannotTell},
 		{"/Library/Mobile Documents/x", false, appdirs.SyncCannotTell},
 		{"/Users/b/data", false, appdirs.SyncCannotTell},
 		{"/Users/c/Library/Mobile Documents/x", false, appdirs.SyncCannotTell},

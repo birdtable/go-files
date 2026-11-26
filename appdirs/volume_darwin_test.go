@@ -53,3 +53,31 @@ func TestVolumeReadsTheFileProvidersMarksOnAnAPFSVolume(t *testing.T) {
 		}
 	}
 }
+
+// On macOS a folder below an unmarked Library/CloudStorage or Library/Mobile Documents folder is
+// Unknown under each spelling of those names, on the temp folder's APFS volume: the system's,
+// library in lower case, and both names in lower case. Each spelling is made, which on a volume
+// that matches names with no case is the one folder.
+//
+// What it costs when this fails: a path a program was handed in another case, from a config value,
+// an argument or os.Getwd, misses the one check between an unmarked provider folder and Local.
+func TestVolumeReadsAProviderFolderUnknownInEachSpelling(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, rel := range []string{
+		"Library/CloudStorage/Provider/data",
+		"library/CloudStorage/Provider/data",
+		"library/cloudstorage/Provider/data",
+		"Library/Mobile Documents/com~apple~CloudDocs/data",
+		"library/Mobile Documents/com~apple~CloudDocs/data",
+		"library/mobile documents/com~apple~CloudDocs/data",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := appdirs.Volume(p); err != nil || got != (appdirs.VolumeInfo{Type: "apfs", Kind: appdirs.Unknown}) {
+			t.Errorf("Volume(%s) = %+v, %v, want Unknown on apfs", rel, got, err)
+		}
+	}
+}

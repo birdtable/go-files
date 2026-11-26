@@ -33,9 +33,9 @@ const (
 	bcachefsMagic = 0xca451a4e
 	overlayMagic  = 0x794c7630
 
-	// domainMark is the attribute macOS puts on the folder of a File Provider domain, which a
-	// process of the account cannot set; providerMark leads the attributes the File Provider puts on
-	// the items it keeps.
+	// domainMark leads the attribute macOS puts on the folder of a File Provider domain, which a
+	// process of the account cannot set, with any flag suffix after it; providerMark leads the
+	// attributes the File Provider puts on the items it keeps.
 	domainMark   = "com.apple.file-provider-domain-id"
 	providerMark = "com.apple.fileprovider."
 
@@ -79,10 +79,10 @@ func darwinVolume(typ string, local bool, sync syncAnswer) VolumeInfo {
 
 // darwinSync is what the File Provider's marks say of resolved, an absolute path with no link in
 // it, that dataless says whether the provider evicted: marked where it did, or where resolved or a
-// folder above it holds the domain's mark or a com.apple.fileprovider. attribute; cannot tell
-// where the attributes of one of them cannot be listed, or where one is a CloudStorage or Mobile
-// Documents folder in a Library folder and none is marked. names lists a name's attributes, no
-// link followed.
+// folder above it holds an attribute that domainMark or providerMark leads; cannot tell where the
+// attributes of one of them cannot be listed, or where one is a CloudStorage or Mobile Documents
+// folder in a Library folder, each name matched with no case, as APFS and HFS+ match names, and
+// none is marked. names lists a name's attributes, no link followed.
 func darwinSync(resolved string, dataless bool, names func(string) ([]string, error)) syncAnswer {
 	if dataless {
 		return syncMarked
@@ -94,11 +94,11 @@ func darwinSync(resolved string, dataless bool, names func(string) ([]string, er
 			answer = syncCannotTell
 		}
 		for _, n := range got {
-			if n == domainMark || strings.HasPrefix(n, providerMark) {
+			if strings.HasPrefix(n, domainMark) || strings.HasPrefix(n, providerMark) {
 				return syncMarked
 			}
 		}
-		if b := path.Base(p); (b == "CloudStorage" || b == "Mobile Documents") && path.Base(path.Dir(p)) == "Library" {
+		if b := path.Base(p); (strings.EqualFold(b, "CloudStorage") || strings.EqualFold(b, "Mobile Documents")) && strings.EqualFold(path.Base(path.Dir(p)), "Library") {
 			answer = syncCannotTell
 		}
 		if path.Dir(p) == p {
@@ -109,8 +109,10 @@ func darwinSync(resolved string, dataless bool, names func(string) ([]string, er
 
 // linuxVolume is the rule of a Linux file system of the magic number magic, which the mount table
 // names fstype. The magic number alone decides; fstype names it, or the number in hex where the
-// table names none. overlay is Local: its upper layer, where writes go, cannot be NFS, which keeps
-// no extended attributes for it.
+// table names none. overlay is Local, as a container's root needs: its upper layer, where writes
+// go, cannot be NFS, which keeps no extended attributes for it, but it can be a FUSE file system,
+// virtiofs among them, and such an overlay reads Local all the same, where its upper folder asked
+// itself is FUSE.
 func linuxVolume(magic uint32, fstype string) VolumeInfo {
 	v := VolumeInfo{Type: fstype}
 	if v.Type == "" {

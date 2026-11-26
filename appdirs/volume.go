@@ -17,8 +17,12 @@ const (
 	// Unknown is a volume the system names but Volume cannot place, or one whose sync-provider
 	// marks cannot be read. It is never local.
 	Unknown VolumeKind = iota
-	// Local is a file system on a disk of this machine, removable disks among them, that no network,
-	// FUSE daemon or sync provider stands behind.
+	// Local is a file system the system mounts as a disk of this machine's, removable disks among
+	// them, that is not a network share and not FUSE, at a path that carries no sync provider's
+	// mark Volume reads. It says what the system mounts, and no more: a sync client that keeps a
+	// plain folder as whole files, Dropbox on Linux, Syncthing or a mirror-mode folder, and a local
+	// file system on a block device the network serves, a disk image or sparse bundle on a share,
+	// iSCSI or NBD, a loop file on NFS, a VHDX opened from a share, read Local.
 	Local
 	// Network is a file system served over the network: NFS, SMB and CIFS, AFP, WebDAV, AFS, Ceph,
 	// Coda and 9p, and on Windows any remote drive.
@@ -69,9 +73,13 @@ func (v VolumeInfo) Local() bool { return v.Kind == Local }
 //     Network. A path in a File Provider domain is SyncPlaceholder: the system's domain mark on the
 //     path or a folder above it, a com.apple.fileprovider. attribute there, or a file the provider
 //     evicted. A path below a Library/CloudStorage or Library/Mobile Documents folder that carries no
-//     mark, or whose folders' attributes cannot be listed, is Unknown.
+//     mark, or whose folders' attributes cannot be listed, is Unknown, each name matched with no
+//     case, as APFS and HFS+ match names.
 //   - On Linux, statfs's magic number, and the mount table's fstype for Type, which names FUSE's
-//     subtype (fuse.sshfs, fuse.rclone). Linux keeps no sync-provider placeholders.
+//     subtype (fuse.sshfs, fuse.rclone). Linux keeps no sync-provider placeholders. overlay is
+//     Local, as a container's root needs, whatever its layers are on: an overlay whose upper
+//     layer is FUSE, virtiofs among them, reads Local, where the upper folder asked itself answers
+//     FUSE.
 //   - On Windows, the volume's NT device, its drive type and its file system name, then whether the
 //     path is under a Cloud Files sync root: a Cloud Files reparse tag on the path or a folder above
 //     it, up to the volume's root, each opened with no link followed, or a sync root the system
@@ -87,7 +95,12 @@ func (v VolumeInfo) Local() bool { return v.Kind == Local }
 // answers, and neither reads as local.
 //
 // The answer is the volume's now: a mount over the folder, or a sync provider set up later, may
-// answer otherwise.
+// answer otherwise. Local is what the system mounts, as its doc says: a sync client that leaves no
+// File Provider or Cloud Files mark, and a network behind the block device, are not seen. Neither
+// macOS's File Provider detection nor Windows' Cloud Files detection is yet proved on a real
+// domain or sync root, iCloud's Desktop and Documents sync among them, which keeps ~/Desktop and
+// ~/Documents outside Library; until go-files#19's run proves them, take SyncPlaceholder on either
+// as best effort.
 func Volume(path string) (VolumeInfo, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
