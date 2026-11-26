@@ -345,6 +345,14 @@ the zero `VolumeInfo`, which is `Unknown`. An error and `Unknown` are separate a
 reads as local. The answer is the volume's when asked: a mount over the folder, or a sync provider
 set up later, may answer otherwise.
 
+Windows' Cloud Files detection is not yet proved on a real OneDrive sync root: no runner it is
+tested on has one. Its reparse tag half may never see a tag, as the Cloud Files filter can disguise
+placeholders from a process that has not opted in to seeing them, and its registry half matches a
+root as the registry spells it, so a root registered through a junction or another spelling of its
+path does not match. Until the run of
+[go-files#19](https://github.com/birdtable/go-files/issues/19) proves it, a caller that must not run
+on a sync folder should take `SyncPlaceholder` on Windows as best effort.
+
 
 
 ## The alternatives looked at
