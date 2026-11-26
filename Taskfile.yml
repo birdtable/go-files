@@ -3,9 +3,10 @@
 # and built by go tool on first use, so nothing is installed on the machine.
 #
 # A tier is a task whose members run together (deps:), each member with a timeout: on its cmds
-# line. A member waits only for one it needs; none of these needs another, so none waits. A tier
-# starts and ends with gate/budget.sh, which has hatch budget hold its elapsed seconds to its budget
-# in gate/budgets.yaml. hatch is pinned in
+# line. A member waits only for one it needs; none of these needs another, so none waits. pre-push
+# is one step of gate/budget.sh, which has hatch budget run its members and hold the CPU time they
+# used to its CPU limit in gate/budgets.yaml; pre-commit and release start and end with it, and it
+# has hatch budget hold their elapsed seconds to their budgets there. hatch is pinned in
 # tools/hatch.mod and called through go tool, as test calls hatch tests.
 #
 # A member that reads only the tree skips when its inputs are what they were at its last pass:
@@ -41,10 +42,9 @@ tasks:
     cmds:
       - go tool -modfile=tools/task.mod task --list
 
-  # Each tier starts and ends with gate/budget.sh, its tier and step set here in literal words, as
-  # its comment says why: no start, load or tier rides a Task var, which the caller's environment
-  # would set over the tier's own. Its start is kept per run, so two runs of one tier each time
-  # themselves.
+  # Each tier runs gate/budget.sh, its tier and step set here in literal words, as its comment
+  # says why: no start, load or tier rides a Task var, which the caller's environment would set over
+  # the tier's own. A start is kept per run, so two runs of one tier each time themselves.
   pre-commit:
     desc: the tier that runs on every commit, fast
     cmds:
@@ -60,19 +60,15 @@ tasks:
     internal: true
     deps: [fmt, vet, lint, unread, secrets-tree, consumer, contract]
 
+  # pre-push is judged by its CPU time: its one step has hatch run pre-push-members, which is
+  # not internal so that hatch's run of task can name it, and has no desc, so --list leaves it out.
   pre-push:
     desc: the tier that runs on every push, and the only claim that counts as done
     cmds:
-      - cmd: tier=pre-push; step=start; . ./gate/budget.sh
+      - cmd: tier=pre-push; step=cpu; . ./gate/budget.sh
         silent: true
-        timeout: 1m
-      - task: pre-push-members
-      - cmd: tier=pre-push; step=end; . ./gate/budget.sh
-        silent: true
-        timeout: 1m
 
   pre-push-members:
-    internal: true
     deps: [fmt, vet, lint, unread, secrets-tree, build, {task: test, vars: {RACE_EXIT_SLEEP: none, TEST_CACHE: used}}, size, tidy, secrets, vuln]
 
   release:
@@ -334,15 +330,15 @@ tasks:
       # a random order. A test that reads the tree through a child, as go list or go build, stats or
       # opens in its own process what the child reads, so the cache keys the pass on it.
       #
-      # At TEST_CACHE used, pre-push also leaves to release one test over a second that guards no
-      # fail-open and is in no guard row: the tiers' test-cache
-      # flags, which release runs and holds. A test a guard row names stays here. -skip,
+      # At TEST_CACHE used, pre-push also leaves to release the tests over a second that guard no
+      # fail-open: the tiers' test-cache flags, and pre-push's hang guard, each of which release runs
+      # and holds. A guard row whose break lets a push through names a test that stays here. -skip,
       # unlike t.Skip, reports no skip, and is one of go test's cacheable flags. The names are
       # written here, not in a variable a caller's environment could set over them, and
       # TestOnlyThePushTierRunsTheTestsWithNoRaceExitSleep holds the list.
       - cmd: |
           {{if eq .RACE_EXIT_SLEEP "none"}}export GORACE="${GORACE:+$GORACE }atexit_sleep_ms=0"{{end}}
-          go tool -modfile=tools/hatch.mod hatch tests --timeout 9m30s --red-when failed,none-ran,any-skipped --green-word green --red-word red -race{{if ne .TEST_CACHE "used"}} -shuffle=on -count=1{{else}} -skip '^(TestOnlyThePushTierUsesTheTestCache)$'{{end}} -timeout=9m ./...
+          go tool -modfile=tools/hatch.mod hatch tests --timeout 9m30s --red-when failed,none-ran,any-skipped --green-word green --red-word red -race{{if ne .TEST_CACHE "used"}} -shuffle=on -count=1{{else}} -skip '^(TestOnlyThePushTierUsesTheTestCache|TestThePushTiersWallTimeIsOnlyAHangGuard)$'{{end}} -timeout=9m ./...
         timeout: 10m
 
   unread:

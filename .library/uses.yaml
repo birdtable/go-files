@@ -161,9 +161,9 @@ picks:
     sources:
       - ".changie.yaml"
       - "tools/changie.mod"
-  - item: "hatch v0.2.0"
+  - item: "hatch v0.7.0"
     register_key: "tool:hatch"
-    job: "each tier's load-aware budget (hatch budget) and the race tests' verdict, a skip or zero tests red (hatch tests)"
+    job: "the push tier's CPU-time budget with its wall-time hang guard (hatch budget --cpu), the commit and release tiers' load-aware budgets (hatch budget) and the race tests' verdict, a skip or zero tests red (hatch tests)"
     scope: "the repo Taskfile and gate/budget.sh"
     ban: "none: the tool itself"
     banned_calls: []
