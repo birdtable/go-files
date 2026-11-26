@@ -1,3 +1,0 @@
-kind: Added
-body: 'write.LogWriter(ctx, root, name, limit, opts...) is an io.Writer over write.Append, for log/slog''s handlers and other line loggers. Each Write must hold whole lines, each ending in a newline, and each line goes through Append with the writer''s ctx, cap and options, so each is one write and the cap holds line by line. A Write that does not end in a newline, an empty one included, is refused with an error matching fs.ErrInvalid, nothing of it written and nothing kept back; a Write that fails on a line returns the bytes of the lines before it and writes none after. The ctx is the writer''s for its whole life, as io.Writer''s Write takes none.'
-time: 2026-11-26T23:05:00.000000+01:00
