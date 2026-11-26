@@ -608,11 +608,15 @@ func stubTiers(t *testing.T, cmd string) string {
 }
 
 // TestATierTimesItselfWhateverTheEnvironmentSays runs each tier of Taskfile.yml, its members put by
-// a command that does nothing, with LOAD=16, START=1, another tier's TIER, and the script's own
-// tier and step exported, as `LOAD=16 git push` hands them to the hook. None of these may reach
-// budget: the tier is timed from its own start, at the load it read,
-// under its own name.
+// a command that does nothing, with LOAD, START=1, another tier's TIER, and the script's own tier
+// and step exported, as `LOAD=16 git push` hands them to the hook. None of these may reach budget:
+// the tier is timed from its own start, at the load it read, under its own name.
+//
+// The LOAD it gives is fakeLoad, which budget's own check of a load passes and no host reads: a
+// load average counts tasks, and Linux holds at most 2^22 of them, so a load the host read can
+// never be taken for the environment's (go-files#21, where LOAD=16 met a host at 16.0).
 func TestATierTimesItselfWhateverTheEnvironmentSays(t *testing.T) {
+	const fakeLoad = "99999999"
 	t.Parallel()
 	warmPushTools(t)
 	stubbed := stubTiers(t, `"true"`)
@@ -626,7 +630,7 @@ func TestATierTimesItselfWhateverTheEnvironmentSays(t *testing.T) {
 			dir := budgetDir(t, map[string]string{"Taskfile.yml": stubbed})
 			cmd := taskCmd(t, "-d", dir, c.tier)
 			isolate(cmd)
-			cmd.Env = append(cmd.Env, "LOAD=16", "START=1", "TIER="+c.other, "tier="+c.other, "step=end", offline)
+			cmd.Env = append(cmd.Env, "LOAD="+fakeLoad, "START=1", "TIER="+c.other, "tier="+c.other, "step=end", offline)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("task %s: %v, and want it to pass within its budget:\n%s", c.tier, err, out)
@@ -639,10 +643,10 @@ func TestATierTimesItselfWhateverTheEnvironmentSays(t *testing.T) {
 			if cpu := fmt.Sprintf(`^budget: pre-push used \d+\.\d s of CPU of %d s$`, testBudget); c.tier == "pre-push" && !saysLine(out, regexp.MustCompile(cpu)) {
 				t.Fatalf("task pre-push said no line matching %s:\n%s", cpu, out)
 			}
-			// A load hatch read from the host is said with one decimal, and 16.0 only by chance;
-			// where the host has none, hatch says it is unknown.
-			if saysLine(out, regexp.MustCompile(`^budget: load 16\.0 before `)) {
-				t.Fatalf("task %s said the load before it was 16.0, as the environment did:\n%s", c.tier, out)
+			// A load the host has is said with one decimal, and where it has none, hatch says it
+			// is unknown; fakeLoad, in any line, came from the environment.
+			if saysLine(out, regexp.MustCompile(`\bload `+fakeLoad+`\b`)) {
+				t.Fatalf("task %s said the load was %s, as the environment did:\n%s", c.tier, fakeLoad, out)
 			}
 		})
 	}
