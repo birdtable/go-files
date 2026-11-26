@@ -1,9 +1,11 @@
 package write_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -79,4 +81,41 @@ func ExampleKeepIn() {
 	}
 	fmt.Print(string(b))
 	// Output: {"theme": "dark"}
+}
+
+// A program logs through log/slog, one JSON record a line, to a log beneath its state folder
+// kept under 1 MiB, the full log moved to inventory.log.1. The handler writes each record with
+// its newline in one Write, which LogWriter appends as one line. The time is left out here so
+// the output is the same at every run.
+func ExampleLogWriter() {
+	stateDir, err := os.MkdirTemp("", "myprogram-state")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(stateDir)
+	state, err := os.OpenRoot(stateDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer state.Close()
+
+	w := write.LogWriter(context.Background(), state, "inventory.log", 1<<20, write.Aside("inventory.log.1"))
+	noTime := func(groups []string, a slog.Attr) slog.Attr {
+		if len(groups) == 0 && a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		return a
+	}
+	logger := slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: noTime}))
+	logger.Info("counted", "shelf", "a3", "items", 12)
+	logger.Warn("short", "shelf", "b1", "want", 4, "have", 1)
+
+	b, err := state.ReadFile("inventory.log")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Print(string(b))
+	// Output:
+	// {"level":"INFO","msg":"counted","shelf":"a3","items":12}
+	// {"level":"WARN","msg":"short","shelf":"b1","want":4,"have":1}
 }
