@@ -331,8 +331,8 @@ tasks:
       # opens in its own process what the child reads, so the cache keys the pass on it.
       #
       # At TEST_CACHE used, pre-push also leaves to release the tests over a second that guard no
-      # fail-open and are in no guard row: the tiers' test-cache flags, and pre-push's hang guard,
-      # each of which release runs and holds. A test a guard row names stays here. -skip,
+      # fail-open: the tiers' test-cache flags, and pre-push's hang guard, each of which release runs
+      # and holds. A guard row whose break lets a push through names a test that stays here. -skip,
       # unlike t.Skip, reports no skip, and is one of go test's cacheable flags. The names are
       # written here, not in a variable a caller's environment could set over them, and
       # TestOnlyThePushTierRunsTheTestsWithNoRaceExitSleep holds the list.

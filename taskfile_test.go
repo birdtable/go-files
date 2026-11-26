@@ -437,7 +437,8 @@ const offline = "GOPROXY=off"
 
 // budgetDir makes a folder budget runs in: gate/budget.sh as the tree has it, a gate/budgets.yaml
 // that names this host with testBudget for each tier's wall budget and pre-push's CPU limit, or
-// with the rows files gives it at gate/budgets.yaml, go.mod and hatch's and go-task's modfiles,
+// with the rows files gives it at gate/budgets.yaml (under their own host line, if they start with
+// one), go.mod and hatch's and go-task's modfiles,
 // which go tool reads their pins from (pre-push's step runs its members by task), and the files
 // named in files, relative to it.
 func budgetDir(t *testing.T, files map[string]string) string {
@@ -453,7 +454,12 @@ func budgetDir(t *testing.T, files map[string]string) string {
 	if given, ok := files["gate/budgets.yaml"]; ok {
 		rows = given
 	}
-	files["gate/budgets.yaml"] = "host: " + host + "\n" + rows
+	// Rows that name a host of their own keep it: the test runs a tier on a kind of host the file
+	// has no row for.
+	if !strings.HasPrefix(rows, "host: ") {
+		rows = "host: " + host + "\n" + rows
+	}
+	files["gate/budgets.yaml"] = rows
 	for name, body := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -773,14 +779,18 @@ func pushTier(t *testing.T, rows, cmd string) ([]byte, error) {
 // --cpu, its wall budget far over what a run takes: members within the CPU limit pass, saying the
 // CPU time they used; over it they fail, at a wall time within budget; members that fail fail the
 // tier; and a budgets file with no CPU row for pre-push refuses it, so a push is never judged by its
-// wall time alone.
+// wall time alone. On a kind of host the file has no row for, budget runs the members itself:
+// members that fail fail the tier there too, and members that pass pass, saying no budget applies.
 //
 // What it costs when this fails: a push whose tier used more CPU than its limit passes, and the tier
-// grows slower unseen; or a tier whose CPU row is gone falls back to wall time, which a loaded
-// machine fails.
+// grows slower unseen; a tier whose CPU row is gone falls back to wall time, which a loaded
+// machine fails; or, on Linux, Windows or an Intel Mac, a push whose tests or lint fail passes.
 func TestThePushTierIsJudgedByItsCPUTime(t *testing.T) {
 	t.Parallel()
 	wall := fmt.Sprintf("pre-push-budget: %d\n", testBudget)
+	// A kind of host no machine has, with every row: budget runs the members itself there, as on
+	// any host but the one gate/budgets.yaml names, and only prints the time.
+	otherHost := "host: Plan9-mips\n" + wall + fmt.Sprintf("pre-push-cpu-limit: %d\n", testBudget)
 	for _, c := range []struct {
 		name, rows, cmd string
 		pass            bool
@@ -790,6 +800,8 @@ func TestThePushTierIsJudgedByItsCPUTime(t *testing.T) {
 		{"members over the CPU limit fail", wall + "pre-push-cpu-limit: 0\n", `"true"`, false, `^hatch budget: pre-push is over its CPU budget$`},
 		{"members that fail fail the tier", wall + fmt.Sprintf("pre-push-cpu-limit: %d\n", testBudget), `"false"`, false, `^hatch budget: pre-push: the command exited [1-9]\d*$`},
 		{"a tier with no CPU row is refused", wall, `"true"`, false, `has no single CPU limit for pre-push, and a tier is never judged by wall time alone under --cpu$`},
+		{"on a host with no row, members that fail fail the tier", otherHost, `"false"`, false, `^task: Failed to run task "pre-push-members": exit status 1$`},
+		{"on a host with no row, members that pass pass, saying no budget applies", otherHost, `"true"`, true, `^pre-push took \d+s( at load [0-9.]+)?; no budget for this kind of host \([^)]+\), so none applies$`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -808,27 +820,29 @@ func TestThePushTierIsJudgedByItsCPUTime(t *testing.T) {
 }
 
 // TestThePushTiersWallTimeIsOnlyAHangGuard runs pre-push, as Taskfile.yml has it, under hatch budget
-// --cpu with a wall budget of 1 s: members that sleep 2 s pass on their CPU time, saying the tier was
-// over its wall limit; members that sleep 30 s are killed at 10 times the wall budget, and the tier
-// fails as hung. It runs over a second and guards no fail-open, so pre-push leaves it to release
+// --cpu: with a wall budget of 3 s, members that sleep 4 s pass on their CPU time, saying the tier was
+// over its wall limit, and a loaded machine has 30 s before the hang guard; with a wall budget of
+// 1 s, members that sleep 30 s are killed at 10 times it, and the tier fails as hung. It runs over a second and guards no fail-open, so pre-push leaves it to release
 // (pushSkips).
 //
 // What it costs when this fails: a loaded machine fails a push whose CPU time is within its limit;
 // or a hung tier holds a push open with nothing to end it.
 func TestThePushTiersWallTimeIsOnlyAHangGuard(t *testing.T) {
 	t.Parallel()
-	rows := fmt.Sprintf("pre-push-budget: 1\npre-push-cpu-limit: %d\n", testBudget)
+	rows := func(wall int) string {
+		return fmt.Sprintf("pre-push-budget: %d\npre-push-cpu-limit: %d\n", wall, testBudget)
+	}
 	for _, c := range []struct {
-		name, cmd string
-		pass      bool
-		line      string // a line of what the tier says, as a regular expression
+		name, rows, cmd string
+		pass            bool
+		line            string // a line of what the tier says, as a regular expression
 	}{
-		{"members over the wall budget pass on their CPU time", `"sleep 2"`, true, `^budget: pre-push is over its wall limit of 1 s, and passes or fails on its CPU time alone`},
-		{"members still running at 10 times the wall budget fail as hung", `"sleep 30"`, false, `^hatch budget: pre-push: hung: still running at 10s, which is 10 times its wall limit, and its tree was killed$`},
+		{"members over the wall budget pass on their CPU time", rows(3), `"sleep 4"`, true, `^budget: pre-push is over its wall limit of 3 s, and passes or fails on its CPU time alone`},
+		{"members still running at 10 times the wall budget fail as hung", rows(1), `"sleep 30"`, false, `^hatch budget: pre-push: hung: still running at 10s, which is 10 times its wall limit, and its tree was killed$`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			out, err := pushTier(t, rows, c.cmd)
+			out, err := pushTier(t, c.rows, c.cmd)
 			switch {
 			case c.pass && err != nil:
 				t.Fatalf("task pre-push: %v, and want it to pass:\n%s", err, out)
@@ -1155,8 +1169,8 @@ func dryTier(tier string) string {
 	return tier
 }
 
-// pushSkips is the tests pre-push leaves to release, as A|B, each over a second, guarding no
-// fail-open and in no guard row.
+// pushSkips is the tests pre-push leaves to release, as A|B, each over a second and guarding no
+// fail-open: a guard row whose break lets a push through names a test pre-push runs.
 const pushSkips = "TestOnlyThePushTierUsesTheTestCache|TestThePushTiersWallTimeIsOnlyAHangGuard"
 
 // leftOut is the names of the tests the test member leaves out of a tier, read from the go test
