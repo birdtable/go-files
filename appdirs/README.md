@@ -1,9 +1,9 @@
 # appdirs
 
 `appdirs` names the folders a Go program keeps its files in, on Linux, FreeBSD, macOS and
-Windows, says how much room a folder has, and makes the one folder that is hard to make safely:
-the program's own temp folder. It imports the standard library, `golang.org/x/sys` and this
-module's `trust`, which judges that folder.
+Windows, says how much room a folder has and what kind of volume holds it, and makes the one
+folder that is hard to make safely: the program's own temp folder. It imports the standard
+library, `golang.org/x/sys` and this module's `trust`, which judges that folder.
 
 ## Install
 
@@ -19,7 +19,7 @@ Built on the XDG Base Directory layout, macOS's `Library` and Windows' `LOCALAPP
 `github.com/adrg/xdg` reads them. `os.UserConfigDir` agrees on the XDG layout alone. On Windows it
 is the roaming `%AppData%`, which `appdirs` never uses. It adds the system, the home folder and
 the environment handed in, so a test on one system checks another's, a `Run` and a `Data` folder,
-`Temp` and `Free`. The program configures its name, the system, the home folder, the environment
+`Temp`, `Free` and `Volume`. The program configures its name, the system, the home folder, the environment
 reader, the `Layout` on macOS, and what `Temp`'s `trust.Who` values carry: its apart folders and mounts.
 
 `For` is a pure function of what it is handed: the system, the program's name, the home folder
@@ -44,6 +44,9 @@ everything. It makes no folder: the program makes the one it writes to, with the
 | `Temp(app, who...)` | The running account's own temp folder for the program `app`, made `0700` when it is not there (on Windows with an access list only this account and SYSTEM reach, none of the temp folder's inherited), judged by `trust` as this account's with no link on its way, and kept apart from each folder of `who`'s `Apart`, below. |
 | `TempOverflow(app, who...)` | `Temp` for a test in a Linux user namespace that maps this account and not root: both walks set `trust.Who.Overflow`, below. For tests alone. |
 | `Free(path)` | The bytes free to this account on the file system that holds `path`: what a write by this process may fill. |
+| `Volume(path)` | What kind of volume holds `path`, links followed, as a `VolumeInfo`, so a program that keeps a database or a lock file there can refuse one whose locks and fsync it may not trust: below. Experimental. |
+| `VolumeInfo` | `Type`, the system's own name for the file system (`apfs`, `ext4`, `fuse.sshfs`, `NTFS`), which names and decides nothing, and `Kind`. `Local()` is true for `Local` alone. Experimental. |
+| `VolumeKind`: `Local`, `Network`, `FUSE`, `SyncPlaceholder`, `Unknown` | A disk of this machine, removable ones among them, with no network, FUSE daemon or sync provider behind it; a share served over the network; a file system served through FUSE; a folder a sync provider keeps and may evict; or a volume `Volume` cannot place. The zero value is `Unknown`, so an unset `VolumeInfo` never reads as local. Experimental. |
 | `AccountHome()` | The home of the account that runs the process, from the system's account records and never the environment: below. Experimental. |
 | `ErrLayout`, `ErrHome`, `ErrApp`, `ErrSystem` | `For`'s four refusals, below. |
 | `ErrNoAccountHome` | `AccountHome`'s refusal, where the system cannot say the home or says one empty, relative or not clean. Experimental. |
@@ -327,6 +330,29 @@ namespace where `/` reads as another account's: a runner that cannot prove those
 | the others | none | an `*fs.PathError` matching `errors.ErrUnsupported`. |
 
 A path that is not there is an `*fs.PathError` matching `fs.ErrNotExist`.
+
+## Volume, per system
+
+| system | what it asks | what is `Local` | what is not |
+|---|---|---|---|
+| macOS | `statfs`'s `f_fstypename` and `MNT_LOCAL`, then `listxattr` of the path and each folder above it, and the path's `SF_DATALESS` flag | `apfs`, `hfs`, `msdos` and `exfat` with `MNT_LOCAL` set and no File Provider mark | a type that holds `fuse` is `FUSE`, whatever `MNT_LOCAL` says, as macFUSE may set it; `nfs`, `smbfs`, `afpfs`, `webdav`, `cifs` and `ftp` are `Network`, FUSE-T's mounts among them, as it serves through NFS or SMB; a path in a File Provider domain, which the system's `com.apple.file-provider-domain-id` or a `com.apple.fileprovider.` attribute on it or a folder above it shows, or an evicted file, is `SyncPlaceholder`; a path below a `Library/CloudStorage` or `Library/Mobile Documents` folder with no mark, one whose folders' attributes cannot be listed, and any other type, `devfs` among them, are `Unknown` |
+| Linux | `statfs`'s `f_type`, and `/proc/self/mountinfo`'s fstype for `Type` | ext2 to ext4, XFS, btrfs, f2fs, tmpfs, ZFS, FAT, exFAT, bcachefs and overlay, whose upper layer cannot be NFS | `FUSE` by its magic number, `fuseblk` and every `fuse.<subtype>` among them; NFS, SMB, CIFS, AFS, Ceph, Coda and 9p are `Network`; any other, procfs, sysfs and NTFS's kernel driver among them, is `Unknown`. The magic number alone decides: `Type` names it. Linux keeps no sync placeholders |
+| Windows | `GetFinalPathNameByHandle` (`VOLUME_NAME_NT`), `GetVolumeInformationByHandleW`'s file system name and `GetDriveType` of the volume; then, on a volume not served over the network, `GetFileInformationByHandleEx` (`FileAttributeTagInfo`) of the final path and each folder above it up to the volume's root, each opened with `FILE_FLAG_OPEN_REPARSE_POINT`, and the sync roots registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager`, each root's `UserSyncRoots` | NTFS, ReFS, FAT, FAT32 and exFAT on a numbered local disk volume, fixed or removable, under no sync root | a remote drive or a `\Device\Mup` path is `Network`, a share of this machine's own disk among them; a file system whose name holds FUSE is `FUSE`; a path below an `IO_REPARSE_TAG_CLOUD` tag or one of its variants, or below a registered sync root, matched by whole names with no case, OneDrive among them, is `SyncPlaceholder`; a path whose tags or the registered roots cannot be read, another device, a WinFsp or Dokan drive that names itself NTFS among them, another drive type and another file system are `Unknown`. The Cloud Files API's own `CfGetSyncRootInfoByPath` is not asked: go-files reaches no DLL's call by name |
+| the others, FreeBSD among them | none | none | an `*fs.PathError` matching `errors.ErrUnsupported` |
+
+A path that is not there is an `*fs.PathError` matching `fs.ErrNotExist`, and any error comes with
+the zero `VolumeInfo`, which is `Unknown`. An error and `Unknown` are separate answers, and neither
+reads as local. The answer is the volume's when asked: a mount over the folder, or a sync provider
+set up later, may answer otherwise.
+
+Windows' Cloud Files detection is not yet proved on a real OneDrive sync root: no runner it is
+tested on has one. Its reparse tag half may never see a tag, as the Cloud Files filter can disguise
+placeholders from a process that has not opted in to seeing them, and its registry half matches a
+root as the registry spells it, so a root registered through a junction or another spelling of its
+path does not match. Until the run of
+[go-files#19](https://github.com/birdtable/go-files/issues/19) proves it, a caller that must not run
+on a sync folder should take `SyncPlaceholder` on Windows as best effort.
+
 
 
 ## The alternatives looked at

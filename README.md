@@ -78,7 +78,7 @@ This is `ExampleFile` in [write/example_test.go](write/example_test.go), so `go 
 | [`splice`](splice/README.md) | Replaces the text between two marker lines, as a pure function over bytes. |
 | [`trust`](trust/README.md) | Checks that no other account can change a program, a key or a file before you run or read it. |
 | [`treesum`](treesum/README.md) | Pins a folder tree by a digest, links and all, and checks it before you run from it. |
-| [`appdirs`](appdirs/README.md) | Names the folders a program keeps its files in, on every system, and makes a safe temp folder. |
+| [`appdirs`](appdirs/README.md) | Names the folders a program keeps its files in, on every system, says what kind of volume holds a folder, and makes a safe temp folder. |
 | [`filestest`](filestest/README.md) | Helpers for your tests: private folders, programs a test starts, and checks of names on every system. |
 
 Each package stands alone: take one or several. Each README says what its calls promise, and
@@ -151,10 +151,10 @@ only.
 | `nowait` | nothing | nothing | nothing |
 | `splice` | nothing | nothing | nothing |
 | `trust` | a program run as the kernel's overflow account where `/proc/self/uid_map` is not the whole range, or where the overflow account cannot be read, with `ErrOverflow`, for `Path`, `ReadOwned`, `Held` and `Account`; a name on a file system whose owners it does not judge, as CIFS, 9p, vfat, exfat or squashfs, with `ErrMount`, until `Who.FileSystems` names the type; a name on a disk mounted `nosuid`, as an account's stick, a CIS `/home` or every disk in a `ProtectSystem=strict` unit is, or `noexec` without `nosuid`, as usbmount mounts a stick and `NoExecPaths=` a unit's disks, with `ErrMount`, until `Who.Mounts` names its folder; below Linux 5.8, every name on tmpfs, overlayfs, FUSE, NFS, 9p, btrfs or ZFS, `$XDG_RUNTIME_DIR` and `/dev/shm` among them; a key, a private file or a `PrivateFolder` on an NFS mount that shows no NFSv4 list, as NFSv3 | a name whose access list cannot be read; a name on a volume mounted to ignore ownership, with `ErrOwnersIgnored`; a name replaced by another file at each of eight tries to read it, with `ErrReplaced`, for `Path`, `ReadOwned` and, on macOS, `Held` | nothing |
-| `appdirs` | nothing | nothing | `Temp`'s folder to make on a volume that keeps no access lists (FAT, exFAT), or one where this account cannot open by name what it makes with that list (a restricted token or an AppContainer the list does not name, a share that knows this account by another SID), with `ErrNoAccessList`, nothing made; `Free` refuses only on a system other than these and FreeBSD |
+| `appdirs` | nothing | nothing | `Temp`'s folder to make on a volume that keeps no access lists (FAT, exFAT), or one where this account cannot open by name what it makes with that list (a restricted token or an AppContainer the list does not name, a share that knows this account by another SID), with `ErrNoAccessList`, nothing made; `Free` refuses only on a system other than these and FreeBSD, and `Volume` only on a system other than these |
 | `treesum` | nothing | nothing | nothing |
 
-A call in this table that refuses changes nothing. The refusals of `confine`'s renames and `appdirs.Free`,
+A call in this table that refuses changes nothing. The refusals of `confine`'s renames, `appdirs.Free` and `appdirs.Volume`,
 `write`'s `ErrNoOwner` and `ErrNoMode`, `confine.ErrNoMode`, each package's `ErrNoAccessList`, and `trust`'s of a list it cannot read on macOS, match `errors.ErrUnsupported`, and an `ErrNoAccessList` whose cause is a denial, as under a restricted token, matches `fs.ErrPermission` too, so a handler tests `ErrNoAccessList` first; `LinkFolder`'s on Windows and `write`'s of a name match `fs.ErrInvalid`, and `ErrOwnersIgnored` and `ErrMount` match `ErrNotOwners`. On
 FreeBSD, NetBSD and every other Unix, `trust` reads no access list, and so refuses every name,
 matching `errors.ErrUnsupported` too. On NetBSD and every system but Linux, macOS, FreeBSD and Windows, `confine.LinkFolder` refuses with `errors.ErrUnsupported`. `lock`'s `ErrNoInherit` matches it too, and `lock` does not build on aix or solaris, where the one lock is fcntl's, which a second open in the process drops.

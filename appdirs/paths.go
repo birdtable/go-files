@@ -1,11 +1,12 @@
 // Package appdirs names the folders a program keeps its files in, on each system, and says how
-// much room a folder has. For reads no environment and no disk: it is handed the system, the
-// program's name, the home folder and a reader of the environment. The README has each layout.
+// much room a folder has and what kind of volume holds it. For reads no environment and no disk:
+// it is handed the system, the program's name, the home folder and a reader of the environment.
+// The README has each layout.
 //
 // Built on the XDG Base Directory layout, macOS's Library and Windows' LOCALAPPDATA, as
 // github.com/adrg/xdg reads them. os.UserConfigDir agrees on the XDG layout alone. On Windows it is
 // the roaming %AppData%, which appdirs never uses. It adds the system, home and environment handed
-// in, a Run and a Data folder, Here, System, Temp and Free. The program configures its name, the system, the home
+// in, a Run and a Data folder, Here, System, Temp, Free and Volume. The program configures its name, the system, the home
 // folder, the environment reader, the Layout on macOS, and Temp's apart folders.
 // It imports the standard library, golang.org/x/sys, trust, confine and internal/fileid, and on Windows internal/winapi.
 package appdirs

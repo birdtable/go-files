@@ -87,7 +87,8 @@ jobs:
           echo "GO_TEST_RACE=${race:-off}" >> "$GITHUB_ENV"
           go test -json $race -shuffle=on -count=1 ./... > "$RUNNER_TEMP/go-test.json"
       # Counts the passed, failed and skipped tests into the log and the job summary, prints each
-      # failed or skipped test's own output, and is red on any failure and on any skip: a test that
+      # failed or skipped test's own output and each passed test's own log lines, which say which of
+      # its cases this runner could run, and is red on any failure and on any skip: a test that
       # skips on a runner proves nothing there. A package that fails with no test failed crashed or
       # timed out (a panic, an exit, the -timeout), and says why in its own output or in the output
       # of the test it started and never ended, so for a failed package it prints those too.
@@ -104,6 +105,10 @@ jobs:
           jq -R -n -r '[inputs | fromjson? | select(.Test != null)] as $e
             | ($e | map(select(.Action == "fail" or .Action == "skip") | .Package + " " + .Test)) as $bad
             | $e[] | select(.Action == "output") | select((.Package + " " + .Test) as $k | any($bad[]; . == $k)) | .Output' "$events" | tr -d '\r'
+          jq -R -n -j '[inputs | fromjson? | select(.Test != null)] as $e
+            | ($e | map(select(.Action == "pass") | .Package + " " + .Test)) as $good
+            | $e[] | select(.Action == "output" and (.Output | test("^ +[^ ]+_test\\.go:[0-9]+: ")))
+            | select((.Package + " " + .Test) as $k | any($good[]; . == $k)) | "ok " + .Test + ": " + (.Output | sub("^ +"; ""))' "$events" | tr -d '\r'
           jq -R -n -j '[inputs | fromjson?] as $e
             | ([$e[] | select(.Test == null and .Action == "fail") | {key: .Package, value: true}] | from_entries) as $failed
             | ([$e[] | select(.Test != null and (.Action == "pass" or .Action == "fail" or .Action == "skip")) | {key: (.Package + " " + .Test), value: true}] | from_entries) as $ended
