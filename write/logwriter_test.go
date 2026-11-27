@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // logWriterIn is a LogWriter on name in dir, through a root of dir it closes at the test's end,
@@ -130,27 +129,12 @@ func TestLogWriterOnAHeldLogEndsWithItsCanceledContext(t *testing.T) {
 	cancel()
 	w := logWriterIn(t, canceled, dir, "app.log", 1000)
 	letGoOf := holdShared(t, log)
-	type result struct {
-		n   int
-		err error
+	n, err := w.Write([]byte("line\n")) // the hold is kept until it returns: a Write that waits on it is a hang go test's timeout reports
+	if n != 0 || !errors.Is(err, context.Canceled) {
+		t.Errorf("Write on a held log with a canceled ctx = %d, %v, want 0 and context.Canceled", n, err)
 	}
-	done := make(chan result, 1)
-	go func() {
-		n, err := w.Write([]byte("line\n"))
-		done <- result{n, err}
-	}()
-	select {
-	case r := <-done:
-		if r.n != 0 || !errors.Is(r.err, context.Canceled) {
-			t.Errorf("Write on a held log with a canceled ctx = %d, %v, want 0 and context.Canceled", r.n, r.err)
-		}
-		holds(t, log, "old\n")
-		letGoOf()
-	case <-time.After(5 * time.Second):
-		letGoOf()
-		r := <-done
-		t.Fatalf("Write on a held log with a canceled ctx returned only once the hold was let go, 5s on: %d, %v", r.n, r.err)
-	}
+	holds(t, log, "old\n")
+	letGoOf()
 	wrote(t, w, "line\n", 5)
 	holds(t, log, "old\nline\n")
 }

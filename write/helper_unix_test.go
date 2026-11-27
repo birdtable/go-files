@@ -90,16 +90,28 @@ func keptAs(t *testing.T, path string, perm os.FileMode) {
 // test has not.
 func holdShared(t *testing.T, path string) func() {
 	t.Helper()
+	_, letGo := sharedHold(t, path)
+	return letGo
+}
+
+// sharedHold is holdShared with the descriptor that keeps the hold, for a test to share. Its let-go
+// drops the flock before the close, as Append's letGo does: a child that a parallel test forks
+// shares the descriptor until it execs, and a close alone leaves the hold with the child.
+func sharedHold(t *testing.T, path string) (*os.File, func()) {
+	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	letGo := func() { _ = f.Close() }
+	letGo := func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:forbidigo // register (path-lock): the reader lets go of its shared hold, for every process that shares the descriptor
+		_ = f.Close()
+	}
 	t.Cleanup(letGo)
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil { //nolint:forbidigo // register (path-lock): a reader's shared hold on Append's log, which the test needs Append to refuse
 		t.Fatal(err)
 	}
-	return letGo
+	return f, letGo
 }
 
 // held is the third swap's act on the held log's name as the hard-link test wants it: done, as the
