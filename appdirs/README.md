@@ -46,7 +46,7 @@ everything. It makes no folder: the program makes the one it writes to, with the
 | `Free(path)` | The bytes free to this account on the file system that holds `path`: what a write by this process may fill. |
 | `Volume(path)` | What kind of volume holds `path`, links followed, as a `VolumeInfo`, so a program that keeps a database or a lock file there can refuse one whose locks and fsync it may not trust: below. Experimental. |
 | `VolumeInfo` | `Type`, the system's own name for the file system (`apfs`, `ext4`, `fuse.sshfs`, `NTFS`), which names and decides nothing, and `Kind`. `Local()` is true for `Local` alone. Experimental. |
-| `VolumeKind`: `Local`, `Network`, `FUSE`, `SyncPlaceholder`, `Unknown` | A disk of this machine, removable ones among them, with no network, FUSE daemon or sync provider behind it; a share served over the network; a file system served through FUSE; a folder a sync provider keeps and may evict; or a volume `Volume` cannot place. The zero value is `Unknown`, so an unset `VolumeInfo` never reads as local. Experimental. |
+| `VolumeKind`: `Local`, `Network`, `FUSE`, `SyncPlaceholder`, `Unknown` | A file system the system mounts as a disk of this machine's, removable ones among them, not a network share and not FUSE, at a path with no sync provider's mark `Volume` reads, which says what the system mounts and no more (below); a share served over the network; a file system served through FUSE; a folder a sync provider keeps and may evict; or a volume `Volume` cannot place. The zero value is `Unknown`, so an unset `VolumeInfo` never reads as local. Experimental. |
 | `AccountHome()` | The home of the account that runs the process, from the system's account records and never the environment: below. Experimental. |
 | `ErrLayout`, `ErrHome`, `ErrApp`, `ErrSystem` | `For`'s four refusals, below. |
 | `ErrNoAccountHome` | `AccountHome`'s refusal, where the system cannot say the home or says one empty, relative or not clean. Experimental. |
@@ -335,8 +335,8 @@ A path that is not there is an `*fs.PathError` matching `fs.ErrNotExist`.
 
 | system | what it asks | what is `Local` | what is not |
 |---|---|---|---|
-| macOS | `statfs`'s `f_fstypename` and `MNT_LOCAL`, then `listxattr` of the path and each folder above it, and the path's `SF_DATALESS` flag | `apfs`, `hfs`, `msdos` and `exfat` with `MNT_LOCAL` set and no File Provider mark | a type that holds `fuse` is `FUSE`, whatever `MNT_LOCAL` says, as macFUSE may set it; `nfs`, `smbfs`, `afpfs`, `webdav`, `cifs` and `ftp` are `Network`, FUSE-T's mounts among them, as it serves through NFS or SMB; a path in a File Provider domain, which the system's `com.apple.file-provider-domain-id` or a `com.apple.fileprovider.` attribute on it or a folder above it shows, or an evicted file, is `SyncPlaceholder`; a path below a `Library/CloudStorage` or `Library/Mobile Documents` folder with no mark, one whose folders' attributes cannot be listed, and any other type, `devfs` among them, are `Unknown` |
-| Linux | `statfs`'s `f_type`, and `/proc/self/mountinfo`'s fstype for `Type` | ext2 to ext4, XFS, btrfs, f2fs, tmpfs, ZFS, FAT, exFAT, bcachefs and overlay, whose upper layer cannot be NFS | `FUSE` by its magic number, `fuseblk` and every `fuse.<subtype>` among them; NFS, SMB, CIFS, AFS, Ceph, Coda and 9p are `Network`; any other, procfs, sysfs and NTFS's kernel driver among them, is `Unknown`. The magic number alone decides: `Type` names it. Linux keeps no sync placeholders |
+| macOS | `statfs`'s `f_fstypename` and `MNT_LOCAL`, then `listxattr` of the path and each folder above it, and the path's `SF_DATALESS` flag | `apfs`, `hfs`, `msdos` and `exfat` with `MNT_LOCAL` set and no File Provider mark | a type that holds `fuse` is `FUSE`, whatever `MNT_LOCAL` says, as macFUSE may set it; `nfs`, `smbfs`, `afpfs`, `webdav`, `cifs` and `ftp` are `Network`, FUSE-T's mounts among them, as it serves through NFS or SMB; a path in a File Provider domain, which an attribute that the system's `com.apple.file-provider-domain-id` or `com.apple.fileprovider.` leads, on it or a folder above it, shows, or an evicted file, is `SyncPlaceholder`; a path below a `Library/CloudStorage` or `Library/Mobile Documents` folder with no mark, each name matched by Go's simple case folding, not the file system's, so another spelling the file system takes for the same folder, a ligature for `st` among them, is not seen, one whose folders' attributes cannot be listed, and any other type, `devfs` among them, are `Unknown` |
+| Linux | `statfs`'s `f_type`, and `/proc/self/mountinfo`'s fstype for `Type` | ext2 to ext4, XFS, btrfs, f2fs, tmpfs, ZFS, FAT, exFAT, bcachefs and overlay, as a container's root needs, whatever its layers are on: an overlay whose upper layer is FUSE, virtiofs among them, is `Local`, where the upper folder asked itself is `FUSE` | `FUSE` by its magic number, `fuseblk` and every `fuse.<subtype>` among them; NFS, SMB, CIFS, AFS, Ceph, Coda and 9p are `Network`; any other, procfs, sysfs and NTFS's kernel driver among them, is `Unknown`. The magic number alone decides: `Type` names it. Linux keeps no sync placeholders |
 | Windows | `GetFinalPathNameByHandle` (`VOLUME_NAME_NT`), `GetVolumeInformationByHandleW`'s file system name and `GetDriveType` of the volume; then, on a volume not served over the network, `GetFileInformationByHandleEx` (`FileAttributeTagInfo`) of the final path and each folder above it up to the volume's root, each opened with `FILE_FLAG_OPEN_REPARSE_POINT`, and the sync roots registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager`, each root's `UserSyncRoots` | NTFS, ReFS, FAT, FAT32 and exFAT on a numbered local disk volume, fixed or removable, under no sync root | a remote drive or a `\Device\Mup` path is `Network`, a share of this machine's own disk among them; a file system whose name holds FUSE is `FUSE`; a path below an `IO_REPARSE_TAG_CLOUD` tag or one of its variants, or below a registered sync root, matched by whole names with no case, OneDrive among them, is `SyncPlaceholder`; a path whose tags or the registered roots cannot be read, another device, a WinFsp or Dokan drive that names itself NTFS among them, another drive type and another file system are `Unknown`. The Cloud Files API's own `CfGetSyncRootInfoByPath` is not asked: go-files reaches no DLL's call by name |
 | the others, FreeBSD among them | none | none | an `*fs.PathError` matching `errors.ErrUnsupported` |
 
@@ -345,13 +345,30 @@ the zero `VolumeInfo`, which is `Unknown`. An error and `Unknown` are separate a
 reads as local. The answer is the volume's when asked: a mount over the folder, or a sync provider
 set up later, may answer otherwise.
 
-Windows' Cloud Files detection is not yet proved on a real OneDrive sync root: no runner it is
-tested on has one. Its reparse tag half may never see a tag, as the Cloud Files filter can disguise
-placeholders from a process that has not opted in to seeing them, and its registry half matches a
-root as the registry spells it, so a root registered through a junction or another spelling of its
-path does not match. Until the run of
-[go-files#19](https://github.com/birdtable/go-files/issues/19) proves it, a caller that must not run
-on a sync folder should take `SyncPlaceholder` on Windows as best effort.
+`Local` says what the system mounts, and no more. It does not say that no sync client copies the
+folder as whole files, nor that no network serves the block device under the file system. So these
+read `Local`:
+
+- a plain folder a sync client keeps as whole files, with no placeholder and no mark: Dropbox on
+  Linux, Syncthing on any system, a mirror-mode folder;
+- a local file system on a block device the network serves: an APFS or HFS+ disk image or sparse
+  bundle kept on a share, ext4 on iSCSI or NBD, a loop file on NFS, NTFS in a VHDX opened from a
+  share.
+
+macOS's File Provider detection is not yet proved on a real domain, and Windows' Cloud Files
+detection is not yet proved on a real OneDrive sync root: no runner they are tested on has one. On
+macOS, iCloud's Desktop and Documents sync keeps `~/Desktop` and `~/Documents` outside both
+`Library` folders, so where those carry no mark they read `Local`. On Windows the reparse tag half
+may never see a tag, as the Cloud Files filter can disguise placeholders from a process that has not
+opted in to seeing them, and the registry half matches a root as the registry spells it, so a root
+registered through a junction or another spelling of its path does not match.
+
+So a caller that must not run on a sync folder learns from `Volume` only what the system marks: a
+File Provider domain or a Cloud Files sync root it can read, and on macOS an unmarked
+`Library/CloudStorage` or `Library/Mobile Documents` folder, which reads `Unknown`. It does not
+learn of a whole-file sync client or a block device the network serves. Until the run of
+[go-files#19](https://github.com/birdtable/go-files/issues/19) proves the detection on both
+systems, that caller should take `SyncPlaceholder` on macOS and Windows as best effort.
 
 
 
