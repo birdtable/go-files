@@ -52,14 +52,18 @@ func keptAs(t *testing.T, path string, perm os.FileMode) {
 
 // holdShared takes a shared LockFileEx on the byte Append locks, through a handle opened only to
 // read, as any reader of the log can, and answers the call that lets go, which the test's end makes
-// if the test has not.
+// if the test has not. Its let-go unlocks the byte before the close, as Append's letGo does: the
+// system undoes a lock left on a closed handle only in its own time.
 func holdShared(t *testing.T, path string) func() {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	letGo := func() { _ = f.Close() }
+	letGo := func() {
+		_ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, far()) //nolint:forbidigo // register (path-lock): the reader lets go of its shared hold on Append's byte
+		_ = f.Close()
+	}
 	t.Cleanup(letGo)
 	if err := windows.LockFileEx(windows.Handle(f.Fd()), 0, 0, 1, 0, far()); err != nil { //nolint:forbidigo // register (path-lock): a reader's shared hold on Append's byte, which the test needs Append to refuse
 		t.Fatal(err)
