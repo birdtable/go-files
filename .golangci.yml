@@ -102,7 +102,7 @@ linters:
         # arch.ports.23: operating-system packages only in the host layer.
         os-host:
           # slot os-host begin
-          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/testtoken/**"]
+          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/testtoken/**", "!**/internal/loghold/*_windows.go"]
           # go-files: each package is its own host layer; the layer rows below name what each may import
           # slot os-host end
           deny:
@@ -190,15 +190,15 @@ linters:
         layer-write:
           files: ["**/write/*.go", "!$test", "!**/write/*_windows.go"]
           list-mode: strict
-          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$, github.com/birdtable/go-files/internal/loghold$]
         layer-write-windows:
           files: ["**/write/*_windows.go", "!$test"]
           list-mode: strict
-          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/winapi$, github.com/birdtable/go-files/internal/fileid$]
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/winapi$, github.com/birdtable/go-files/internal/fileid$, github.com/birdtable/go-files/internal/loghold$]
         layer-write-tests:
           files: ["**/write/*_test.go"]
           list-mode: strict
-          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/internal/loghold$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
         layer-confine-tests:
           files: ["**/confine/*_test.go"]
           list-mode: strict
@@ -276,11 +276,26 @@ linters:
         layer-filestest:
           files: ["**/filestest/*.go", "!$test"]
           list-mode: strict
-          allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$]
+          allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/internal/loghold$]
         layer-filestest-tests:
           files: ["**/filestest/*_test.go"]
           list-mode: strict
-          allow: [$gostd, github.com/birdtable/go-files/filestest$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/trust/trusttest$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+          allow: [$gostd, github.com/birdtable/go-files/filestest$, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/trust/trusttest$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$]
+        # internal/loghold is Append's open, refusals and hold, which write and filestest share. Its
+        # Unix file takes the standard library and fileid; its Windows file x/sys for LockFileEx, and
+        # confine for the count of a file's names.
+        layer-loghold:
+          files: ["**/internal/loghold/*.go", "!$test", "!**/internal/loghold/*_windows.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/internal/fileid$]
+        layer-loghold-windows:
+          files: ["**/internal/loghold/*_windows.go", "!$test"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
+        layer-loghold-tests:
+          files: ["**/internal/loghold/*_test.go"]
+          list-mode: strict
+          allow: [$gostd, github.com/birdtable/go-files/internal/loghold$]
         # internal/fileid and the repo's task program import the standard library alone.
         layer-internal:
           files: ["**/internal/fileid/*.go", "**/internal/cmd/measure/*.go"]
@@ -308,7 +323,7 @@ linters:
           list-mode: strict
           allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/lock$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/treesum$, github.com/birdtable/go-files/filestest$]
         layer-no-row:
-          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/testtoken/*.go", "!**/internal/secondconsumer/*.go"]
+          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/loghold/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/testtoken/*.go", "!**/internal/secondconsumer/*.go"]
           list-mode: strict
           allow: [$gostd]
         # slot layer-rows end
@@ -407,12 +422,12 @@ linters:
           msg: "register (confine-to-folder): unix.Openat2 and unix.Renameat2 are confine's own, in its Linux files; security: a hand call elsewhere can leave out confine's resolve flags and follow a link out of the folder"
         # The register (path-lock): a path is held by lock, which
         # locks the file it opened and checked. The kernel's lock calls
-        # are lock's and write's Append's alone (an exclusion below names their
-        # four files).
+        # are lock's and Append's, in internal/loghold, alone (an exclusion below
+        # names their four files).
         - pattern: ^(syscall|unix)\.Flock$
-          msg: "register (path-lock): the kernel's lock calls are lock's, on the file it checked, in its two system files, and Append's, in write's; security: a lock taken by hand elsewhere skips lock's refusals, and follows a link at the lock's name"
+          msg: "register (path-lock): the kernel's lock calls are lock's, on the file it checked, in its two system files, and Append's, in internal/loghold's two; security: a lock taken by hand elsewhere skips lock's refusals, and follows a link at the lock's name"
         - pattern: ^windows\.(Lock|Unlock)FileEx$
-          msg: "register (path-lock): the kernel's lock calls are lock's, on the file it checked, in its two system files, and Append's, in write's; security: a lock taken by hand elsewhere skips lock's refusals, and follows a link at the lock's name"
+          msg: "register (path-lock): the kernel's lock calls are lock's, on the file it checked, in its two system files, and Append's, in internal/loghold's two; security: a lock taken by hand elsewhere skips lock's refusals, and follows a link at the lock's name"
         # The register: no file makes a raw system call: Syscall,
         # RawSyscall, each numbered and N form, their NoError forms, and
         # AllThreadsSyscall and AllThreadsSyscall6, of syscall or of x/sys/unix.
@@ -628,13 +643,15 @@ linters:
         text: "register \\(confine-to-folder\\):"
         source: 'unix\.Openat2\(root, "self/mountinfo", &how\)'
       # The path-lock row holds
-      # outside lock's and write's two system files each. lock locks the file
+      # outside lock's and internal/loghold's two system files each. lock locks the file
       # it opened and checked. Append holds its log on its own
       # descriptor, because write may import only the standard library and
-      # golang.org/x/sys (the link test) and so cannot call lock. The exception
-      # is by file, at the module's root: a fifth file that takes
-      # a lock, or a nested lock/ or write/ folder, is red.
-      - path: ^(write/write_(unix|windows)|lock/(flock|lock_windows))\.go$
+      # golang.org/x/sys (the link test) and so cannot call lock; that hold is
+      # internal/loghold's, moved there from write's two system files (go-files#31)
+      # so filestest.HoldLog takes the same one. The exception is by file, at the
+      # module's root: a fifth file that takes a lock, or a nested lock/ or
+      # internal/loghold/ folder, is red.
+      - path: ^(internal/loghold/loghold_(unix|windows)|lock/(flock|lock_windows))\.go$
         linters: [forbidigo]
         text: "register \\(path-lock\\):"
       # The no-raw-call row holds outside the one darwin
