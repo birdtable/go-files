@@ -81,8 +81,9 @@ func darwinVolume(typ string, local bool, sync syncAnswer) VolumeInfo {
 // it, that dataless says whether the provider evicted: marked where it did, or where resolved or a
 // folder above it holds an attribute that domainMark or providerMark leads; cannot tell where the
 // attributes of one of them cannot be listed, or where one is a CloudStorage or Mobile Documents
-// folder in a Library folder, each name matched with no case, as APFS and HFS+ match names, and
-// none is marked. names lists a name's attributes, no link followed.
+// folder in a Library folder, each name matched by Go's simple case folding, not the file
+// system's, so another spelling the file system takes for the same folder is not seen, and none is
+// marked. names lists a name's attributes, no link followed.
 func darwinSync(resolved string, dataless bool, names func(string) ([]string, error)) syncAnswer {
 	if dataless {
 		return syncMarked

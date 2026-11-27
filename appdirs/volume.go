@@ -73,8 +73,9 @@ func (v VolumeInfo) Local() bool { return v.Kind == Local }
 //     Network. A path in a File Provider domain is SyncPlaceholder: the system's domain mark on the
 //     path or a folder above it, a com.apple.fileprovider. attribute there, or a file the provider
 //     evicted. A path below a Library/CloudStorage or Library/Mobile Documents folder that carries no
-//     mark, or whose folders' attributes cannot be listed, is Unknown, each name matched with no
-//     case, as APFS and HFS+ match names.
+//     mark, or whose folders' attributes cannot be listed, is Unknown. The names are matched by Go's
+//     simple case folding, not the file system's: another spelling the file system takes for the
+//     same folder, a ligature for st among them, is not seen.
 //   - On Linux, statfs's magic number, and the mount table's fstype for Type, which names FUSE's
 //     subtype (fuse.sshfs, fuse.rclone). Linux keeps no sync-provider placeholders. overlay is
 //     Local, as a container's root needs, whatever its layers are on: an overlay whose upper
