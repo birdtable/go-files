@@ -2,6 +2,7 @@ package confine
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"os"
 	"os/exec" //nolint:depguard // cli.process.1: the test makes and attaches an HFS+ disk image with hdiutil; the module has no runner
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -60,20 +63,38 @@ func TestOnMacOSFinalOfANameThisAccountMayNotReadIsErrPermission(t *testing.T) {
 
 // volume makes a 20 MB disk image img of the file system kind, hdiutil's -fs, which needs no root,
 // attaches it on mnt, a folder it makes, and checks that fstatfs names mnt's volume want. It is
-// detached when the test ends, however the test ends, by detach: the detach is registered before
-// the attach runs and finds the image by its path, as trust's tests do (go-files#41), and as
-// cleanups run last registered first, a volume attached beneath another comes off before it, so
-// the outer image is never held busy by the inner. hdiutil is on every Mac, so nothing here skips:
-// a Mac that cannot make or attach one fails the test.
+// taken off when the test ends, however the test ends: the cleanup is registered before the attach
+// runs and finds the image by its path, as trust's tests do (go-files#41). As cleanups run last
+// registered first, a volume attached beneath another comes off before it; and before an image is
+// ejected, every volume still mounted on or beneath mnt is unmounted, the deepest first, as one
+// mounted beneath holds the outer busy even to a forced detach. hdiutil is on every Mac, so
+// nothing here skips: a Mac that cannot make or attach one fails the test.
 func volume(t *testing.T, kind, want, img, mnt string) {
 	t.Helper()
-	if out, err := exec.CommandContext(t.Context(), "/usr/bin/hdiutil", "create", "-fs", kind, "-size", "20m", "-volname", "final", img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
-		t.Fatalf("hdiutil create -fs %s: %v: %s", kind, err, out)
+	if err := makeImage(t.Context(), kind, img); err != nil {
+		t.Fatal(err)
 	}
+	attach(t, want, img, mnt)
+}
+
+// makeImage makes the 20 MB disk image img of the file system kind with hdiutil, which takes some
+// 6 s on a quiet Mac whatever the kind, so a test that needs two makes the second while it uses
+// the first.
+func makeImage(ctx context.Context, kind, img string) error {
+	if out, err := exec.CommandContext(ctx, "/usr/bin/hdiutil", "create", "-fs", kind, "-size", "20m", "-volname", "final", img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
+		return fmt.Errorf("hdiutil create -fs %s: %w: %s", kind, err, out)
+	}
+	return nil
+}
+
+// attach is volume's attach of img, made, on mnt, a folder it makes, and its cleanup.
+func attach(t *testing.T, want, img, mnt string) {
+	t.Helper()
 	if err := os.Mkdir(mnt, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		unmountBeneath(t, mnt)
 		detach(t, img, ejects())
 		if disk, err := imageDisk(img); err == nil && disk != "" {
 			holders(t, mnt)
@@ -88,23 +109,60 @@ func volume(t *testing.T, kind, want, img, mnt string) {
 	}
 }
 
+// mountsBeneath is every mount point on or beneath mnt that getfsstat lists, the deepest first.
+func mountsBeneath(mnt string) ([]string, error) {
+	n, err := unix.Getfsstat(nil, unix.MNT_NOWAIT)
+	if err != nil {
+		return nil, fmt.Errorf("getfsstat: %w", err)
+	}
+	all := make([]unix.Statfs_t, n)
+	if n, err = unix.Getfsstat(all, unix.MNT_NOWAIT); err != nil {
+		return nil, fmt.Errorf("getfsstat: %w", err)
+	}
+	var on []string
+	for _, m := range all[:n] {
+		if at := unix.ByteSliceToString(m.Mntonname[:]); at == mnt || strings.HasPrefix(at, mnt+"/") {
+			on = append(on, at)
+		}
+	}
+	slices.SortFunc(on, func(a, b string) int { return len(b) - len(a) })
+	return on, nil
+}
+
+// unmountTries is how many rounds unmountBeneath makes. Each round is one forced unmount per
+// volume still listed, each a round trip to the system's disk daemon, with no wait between.
+const unmountTries = 5
+
+// unmountBeneath unmounts every volume on or beneath mnt, the deepest first, each by its mount
+// point with diskutil's forced unmount, and makes another round while getfsstat still lists one,
+// up to unmountTries rounds: an APFS volume may stay mounted a moment after its image is ejected,
+// and a volume mounted beneath another holds the outer image busy even to hdiutil's forced detach
+// ("Resource busy", as on main on 28 Nov). Failed unmounts are logged, not failed: detach, next,
+// fails the test if the image stays attached.
+func unmountBeneath(t testing.TB, mnt string) {
+	t.Helper()
+	for range unmountTries {
+		on, err := mountsBeneath(mnt)
+		if err != nil || len(on) == 0 {
+			if err != nil {
+				t.Logf("the image's cleanup, not the rule: %v", err)
+			}
+			return
+		}
+		for _, at := range on {
+			if out, err := exec.Command("/usr/sbin/diskutil", "unmount", "force", at).CombinedOutput(); err != nil { //nolint:noctx,gosec // the test's context has ended by its cleanup; G204: diskutil by its full path, on the test's own mount point
+				t.Logf("the image's cleanup, not the rule: diskutil unmount force %s: %v: %s", at, err, bytes.TrimSpace(out))
+			}
+		}
+	}
+}
+
 // holders logs, for an image its cleanup could not take off, every volume still mounted on or
 // beneath mnt, as getfsstat lists them, and what lsof says this account has open there, so a red
 // run names what held the image.
 func holders(t testing.TB, mnt string) {
 	t.Helper()
-	var on []string
-	n, err := unix.Getfsstat(nil, unix.MNT_NOWAIT)
-	if err == nil {
-		all := make([]unix.Statfs_t, n)
-		if n, err = unix.Getfsstat(all, unix.MNT_NOWAIT); err == nil {
-			for _, m := range all[:n] {
-				if at := unix.ByteSliceToString(m.Mntonname[:]); at == mnt || strings.HasPrefix(at, mnt+"/") {
-					on = append(on, unix.ByteSliceToString(m.Fstypename[:])+" from "+unix.ByteSliceToString(m.Mntfromname[:])+" on "+at)
-				}
-			}
-		}
-	}
+	on, err := mountsBeneath(mnt)
 	out, lerr := exec.Command("/usr/sbin/lsof", "-n", "-P", "+f", "--", mnt).CombinedOutput() //nolint:noctx,gosec // the test's context has ended by its cleanup; G204: lsof by its full path, on the test's own folder
 	t.Logf("the image's cleanup, not the rule: mounted on or beneath %s: %q (%v); lsof of it (%v):\n%s", mnt, on, err, lerr, out)
 }
@@ -216,38 +274,6 @@ func (s *said) Errorf(format string, args ...any) {
 	s.errs = append(s.errs, fmt.Sprintf(format, args...))
 }
 
-// An image attached beneath another's volume, as the nested test attaches APFS beneath HFS+, comes
-// off before it when the test ends, and both are off once it has; an image no way takes off fails
-// the test, and the failure names its disk.
-//
-// What it costs when this fails: the nested test fails now and then on a busy Mac for its cleanup,
-// not for the rule it checks, as main did on 28 Nov ("Resource busy"); or an image left attached
-// passes the test, and stays attached for days, its folder held (go-files#41).
-func TestOnMacOSANestedImageComesOffBeforeTheOneItIsAttachedBeneath(t *testing.T) {
-	t.Parallel()
-	d := finalTemp(t)
-	outer, inner := filepath.Join(d, "hfs.dmg"), filepath.Join(d, "apfs.dmg")
-	// The parent's cleanup runs once its parallel subtest has ended, and its cleanups with it.
-	t.Cleanup(func() {
-		for _, img := range []string{inner, outer} {
-			if disk, err := imageDisk(img); disk != "" || err != nil {
-				t.Errorf("after the test that attached it ended, %s is still attached as %q (%v), and want no image attached", img, disk, err)
-			}
-		}
-	})
-	t.Run("nested", func(t *testing.T) {
-		t.Parallel()
-		mnt := filepath.Join(d, "hfs")
-		volume(t, "JHFS+", "hfs", outer, mnt)
-		volume(t, "APFS", "apfs", inner, filepath.Join(mnt, "m"))
-		stuck := &said{TB: t}
-		detach(stuck, inner, [][]string{{"/usr/bin/false"}})
-		if len(stuck.errs) != 1 || !strings.Contains(stuck.errs[0], inner+" is still attached as /dev/disk") {
-			t.Errorf("no way took the image off, and the test failed with %q, and want one failure that it is still attached", stuck.errs)
-		}
-	})
-}
-
 // hfsLinked attaches a journaled HFS+ image on d/hfs (HFS+ gives a folder a second name only where
 // it is journaled) and gives its folder d1/x a second name, d2/y, by link(2), as Time Machine
 // does; it answers the volume, x and y.
@@ -289,54 +315,90 @@ func finalRefusedWhileLooked(t *testing.T, p, other string) {
 // What it costs when this fails: on an HFS+ volume, as a Time Machine disk is, a folder with a
 // second name answers, and so does every name beneath it, by whichever of the folder's names any
 // process looked at last, in another folder than the path's: a journal keys one file by two names.
-func TestOnMacOSFinalRefusesEveryNameOnAnHFSPlusVolume(t *testing.T) {
-	t.Parallel()
-	mnt, x, y := hfsLinked(t, finalTemp(t))
-	file := filepath.Join(mnt, "file")
-	for _, f := range []string{file, filepath.Join(x, "inside")} {
-		if err := os.WriteFile(f, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, row := range []struct{ p, other string }{{mnt, y}, {file, y}, {x, y}, {filepath.Join(x, "inside"), y}, {y, x}} {
-		finalRefusedWhileLooked(t, row.p, row.other)
-	}
-}
-
-// What it costs when this fails: a volume of a listed type attached beneath an HFS+ folder with a
-// second name, which any account may attach on a folder it owns, is named through that folder by
-// whichever of its names was looked at last, so one file there answers by two names; and a volume
-// of a type not listed answers a name that may be no key, as msdos and exfat answer the spelling a
-// name was first looked up by, so one file keys by two names across a remount.
-func TestOnMacOSFinalAnswersOnlyWhereEveryVolumeOnTheWayIsListed(t *testing.T) {
+// And a volume of a listed type attached beneath such a folder, which any account may attach on a
+// folder it owns, is named through that folder by whichever of its names was looked at last, so
+// one file there answers by two names.
+//
+// The two images, APFS beneath HFS+, are attached in a subtest, and once it has ended, its cleanups
+// with it, neither is attached; an image no way takes off fails the test with its disk named. What
+// that costs when it fails: the test fails now and then on a busy Mac for its cleanup, not for the
+// rule, as main did on 28 Nov ("Resource busy"), or an image left attached passes the test, and
+// stays attached for days, its folder held (go-files#41).
+func TestOnMacOSFinalRefusesEveryNameOnAnHFSPlusVolumeAndBeneathIt(t *testing.T) {
 	t.Parallel()
 	d := finalTemp(t)
-	_, x, y := hfsLinked(t, d)
-	apfs := filepath.Join(x, "m")
-	volume(t, "APFS", "apfs", filepath.Join(d, "apfs.dmg"), apfs)
-	file := filepath.Join(apfs, "file")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	finalRefusedWhileLooked(t, file, y)
-	finalRefusedWhileLooked(t, apfs, y)
+	outer, inner := filepath.Join(d, "hfs.dmg"), filepath.Join(d, "apfs.dmg")
+	// The parent's cleanup runs once its parallel subtest has ended, and the subtest's cleanups with it.
+	t.Cleanup(func() {
+		for _, img := range []string{inner, outer} {
+			if disk, err := imageDisk(img); disk != "" || err != nil {
+				t.Errorf("after the test that attached it ended, %s is still attached as %q (%v), and want no image attached", img, disk, err)
+			}
+		}
+	})
+	t.Run("nested", func(t *testing.T) {
+		t.Parallel()
+		// The APFS image is made while the HFS+ one is made and used; a cleanup waits for it, so
+		// a test that stops early leaves no hdiutil writing in its folder.
+		var made sync.WaitGroup
+		var madeErr error
+		made.Go(func() { madeErr = makeImage(t.Context(), "APFS", inner) })
+		t.Cleanup(made.Wait)
+		mnt, x, y := hfsLinked(t, d)
+		file, inside := filepath.Join(mnt, "file"), filepath.Join(x, "inside")
+		for _, f := range []string{file, inside} {
+			if err := os.WriteFile(f, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, row := range []struct{ p, other string }{{mnt, y}, {file, y}, {x, y}, {inside, y}, {y, x}} {
+			finalRefusedWhileLooked(t, row.p, row.other)
+		}
 
-	// A type not listed, the device file system, is refused, and so are the two FAT types beneath
-	// APFS, which answer the spelling first looked up, not the stored one.
+		made.Wait()
+		if madeErr != nil {
+			t.Fatal(madeErr)
+		}
+		apfs := filepath.Join(x, "m")
+		attach(t, "apfs", inner, apfs)
+		beneath := filepath.Join(apfs, "file")
+		if err := os.WriteFile(beneath, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		finalRefusedWhileLooked(t, beneath, y)
+		finalRefusedWhileLooked(t, apfs, y)
+
+		stuck := &said{TB: t}
+		detach(stuck, inner, [][]string{{"/usr/bin/false"}})
+		if len(stuck.errs) != 1 || !strings.Contains(stuck.errs[0], inner+" is still attached as /dev/disk") {
+			t.Errorf("no way took the image off, and the test failed with %q, and want one failure that it is still attached", stuck.errs)
+		}
+	})
+}
+
+// What it costs when this fails: a volume of a type not listed answers a name that may be no key,
+// as msdos and exfat answer the spelling a name was first looked up by, not the stored one, so one
+// file keys by two names across a remount.
+func TestOnMacOSFinalRefusesEveryNameOnAVolumeOfATypeNotListed(t *testing.T) {
+	t.Parallel()
 	if got, err := Final("/dev/null"); !errors.Is(err, errors.ErrUnsupported) || got != "" {
 		t.Errorf("Final of /dev/null, on devfs = %q, %v, and want errors.ErrUnsupported", got, err)
 	}
 	for _, fat := range []struct{ kind, want string }{{"MS-DOS", "msdos"}, {"ExFAT", "exfat"}} {
-		mnt := filepath.Join(d, fat.want)
-		volume(t, fat.kind, fat.want, filepath.Join(d, fat.want+".dmg"), mnt)
-		file := filepath.Join(mnt, "File")
-		if err := os.WriteFile(file, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		for _, p := range []string{file, mnt} {
-			if got, err := Final(p); !errors.Is(err, errors.ErrUnsupported) || got != "" {
-				t.Errorf("Final of %s, on %s = %q, %v, and want errors.ErrUnsupported", p, fat.want, got, err)
+		t.Run(fat.want, func(t *testing.T) {
+			t.Parallel()
+			d := finalTemp(t)
+			mnt := filepath.Join(d, fat.want)
+			volume(t, fat.kind, fat.want, filepath.Join(d, fat.want+".dmg"), mnt)
+			file := filepath.Join(mnt, "File")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
 			}
-		}
+			for _, p := range []string{file, mnt} {
+				if got, err := Final(p); !errors.Is(err, errors.ErrUnsupported) || got != "" {
+					t.Errorf("Final of %s, on %s = %q, %v, and want errors.ErrUnsupported", p, fat.want, got, err)
+				}
+			}
+		})
 	}
 }
