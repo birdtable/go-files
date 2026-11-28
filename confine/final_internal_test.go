@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -204,5 +205,42 @@ func TestFinalRefusesAnAnswerTheSystemCannotGiveAsUnsupported(t *testing.T) {
 		if errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("Final where the system answers %s: %v, and want no match of fs.ErrNotExist, as the file is there", why, err)
 		}
+	}
+}
+
+func TestFinalOfAFileWithASecondNameAnswersTheNameOpenedOrOnMacOSIsRefused(t *testing.T) {
+	t.Parallel()
+	tmp := finalTemp(t)
+	a, b := filepath.Join(tmp, "a"), filepath.Join(tmp, "sub", "b")
+	if err := os.WriteFile(a, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Dir(b), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(a, b); err != nil {
+		t.Fatal(err)
+	}
+	// look has another look at b between the open of a and the read, as any process may.
+	look := func(f *os.File) (string, error) {
+		if _, err := os.Lstat(b); err != nil {
+			return "", err
+		}
+		return finalOf(f)
+	}
+	for _, p := range []string{a, b} {
+		got, err := final(p, look)
+		if runtime.GOOS == "darwin" {
+			if !errors.Is(err, errors.ErrUnsupported) || got != "" {
+				t.Errorf("Final on macOS of %s, a file with a second name, while %s is looked at = %q, %v, and want errors.ErrUnsupported", p, b, got, err)
+			}
+			continue
+		}
+		if err != nil || got != p {
+			t.Errorf("Final of %s, a file with a second name, while %s is looked at = %q, %v, and want the name opened", p, b, got, err)
+		}
+	}
+	if got := finalOK(t, filepath.Dir(b)); got != filepath.Dir(b) {
+		t.Errorf("Final of the folder %s = %q, and want its own name", filepath.Dir(b), got)
 	}
 }

@@ -5,6 +5,7 @@ package confine
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 )
 
@@ -15,3 +16,5 @@ var errNoFinal = fmt.Errorf("this system has no call that names an open file: %w
 func openFinal(string) (*os.File, error) { return nil, errNoFinal }
 
 func finalOf(*os.File) (string, error) { return "", errNoFinal }
+
+func finalHeld(fs.FileInfo) error { return nil }
