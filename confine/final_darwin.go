@@ -16,20 +16,19 @@ import (
 // path's, so the answer is not a key for the file.
 var errFinalLinks = fmt.Errorf("it has more than one name, a hard link, and macOS names such a file by whichever name was looked at last: %w", errors.ErrUnsupported)
 
-// finalType is whether t, fstatfs's type name, is a file system Final answers on, on macOS: one
-// that gives a folder no second name. On any other, HFS+, where a folder may have one, as a Time
-// Machine disk's folders do, a network share, a FUSE volume, or a type not listed, F_GETPATH may
-// name a folder, and all beneath it, by whichever of its names any process looked at last.
+// finalType is whether t, fstatfs's type name, is a file system Final answers on, on macOS: apfs,
+// which gives a folder no second name and answers a name's stored spelling. On any other, HFS+,
+// where a folder may have one, as a Time Machine disk's folders do, a network share, a FUSE volume,
+// or a type not listed, F_GETPATH may name a folder, and all beneath it, by whichever of its names
+// any process looked at last; msdos and exfat answer the spelling a name was first looked up by
+// since it entered the cache, not the stored one, and a FAT image, bytes any account may write and
+// attach, may give a folder two names.
 func finalType(t string) bool {
-	switch t {
-	case "apfs", "msdos", "exfat":
-		return true
-	}
-	return false
+	return t == "apfs"
 }
 
 // finalVolumes refuses f, the file Final opened, unless its volume and the volume of every folder
-// of name, the answer, up to /, are of a finalType: a volume mounted beneath a folder with a second
+// of name, the answer, up to /, are apfs, a finalType: a volume mounted beneath a folder with a second
 // name is named through it, so the answer is no key unless every volume on the way is listed. A
 // volume that cannot be read is refused too.
 func finalVolumes(f *os.File, name string) error {
@@ -47,7 +46,7 @@ func finalVolumes(f *os.File, name string) error {
 			return fmt.Errorf("the volume of %s cannot be read (%v): %w", at, callErr, errors.ErrUnsupported) //nolint:errorlint // the cause is shown, never matched
 		}
 		if t := unix.ByteSliceToString(st.Fstypename[:]); !finalType(t) {
-			return fmt.Errorf("%s is on a volume of type %q, and macOS answers a name only on apfs, msdos or exfat, which give a folder no second name: %w", at, t, errors.ErrUnsupported)
+			return fmt.Errorf("%s is on a volume of type %q, and macOS answers a name only on apfs, which gives a folder no second name and answers its stored spelling: %w", at, t, errors.ErrUnsupported)
 		}
 		if name == "/" {
 			return nil
@@ -62,8 +61,8 @@ func finalVolumes(f *os.File, name string) error {
 }
 
 // finalHeld refuses held, the file Final opened, read after its name, where it is not a folder and
-// has more than one name. A folder is answered: finalVolumes answers only on a finalType, none of
-// which gives a folder a second name.
+// has more than one name. A folder is answered: finalVolumes answers only on apfs, which gives a
+// folder no second name.
 func finalHeld(held fs.FileInfo) error {
 	if held.IsDir() {
 		return nil

@@ -132,7 +132,8 @@ func TestOnMacOSFinalRefusesEveryNameOnAnHFSPlusVolume(t *testing.T) {
 // What it costs when this fails: a volume of a listed type attached beneath an HFS+ folder with a
 // second name, which any account may attach on a folder it owns, is named through that folder by
 // whichever of its names was looked at last, so one file there answers by two names; and a volume
-// of a type not listed answers a name that may be no key.
+// of a type not listed answers a name that may be no key, as msdos and exfat answer the spelling a
+// name was first looked up by, so one file keys by two names across a remount.
 func TestOnMacOSFinalAnswersOnlyWhereEveryVolumeOnTheWayIsListed(t *testing.T) {
 	t.Parallel()
 	d := finalTemp(t)
@@ -146,16 +147,22 @@ func TestOnMacOSFinalAnswersOnlyWhereEveryVolumeOnTheWayIsListed(t *testing.T) {
 	finalRefusedWhileLooked(t, file, y)
 	finalRefusedWhileLooked(t, apfs, y)
 
-	// A type not listed, the device file system, is refused; a listed one beneath APFS answers.
+	// A type not listed, the device file system, is refused, and so are the two FAT types beneath
+	// APFS, which answer the spelling first looked up, not the stored one.
 	if got, err := Final("/dev/null"); !errors.Is(err, errors.ErrUnsupported) || got != "" {
 		t.Errorf("Final of /dev/null, on devfs = %q, %v, and want errors.ErrUnsupported", got, err)
 	}
-	fat := filepath.Join(d, "fat")
-	volume(t, "MS-DOS", "msdos", filepath.Join(d, "fat.dmg"), fat)
-	if err := os.WriteFile(filepath.Join(fat, "FILE"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := finalOK(t, filepath.Join(fat, "FILE")); got != filepath.Join(fat, "FILE") {
-		t.Errorf("Final of a file on msdos beneath APFS = %q, and want its own name", got)
+	for _, fat := range []struct{ kind, want string }{{"MS-DOS", "msdos"}, {"ExFAT", "exfat"}} {
+		mnt := filepath.Join(d, fat.want)
+		volume(t, fat.kind, fat.want, filepath.Join(d, fat.want+".dmg"), mnt)
+		file := filepath.Join(mnt, "File")
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{file, mnt} {
+			if got, err := Final(p); !errors.Is(err, errors.ErrUnsupported) || got != "" {
+				t.Errorf("Final of %s, on %s = %q, %v, and want errors.ErrUnsupported", p, fat.want, got, err)
+			}
+		}
 	}
 }
