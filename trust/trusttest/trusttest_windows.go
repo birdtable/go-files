@@ -21,7 +21,7 @@ const (
 // identify is SECURITY_SQOS_PRESENT with SECURITY_IDENTIFICATION, internal/winapi's Identify, which
 // trusttest may not import: where an open lands on a named pipe, its server may learn who the
 // caller is and act as it in nothing.
-const identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IMPERSONATION
+const identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IDENTIFICATION
 
 // createFile is windows.CreateFile with identify added to flags, trusttest's one CreateFile.
 func createFile(name *uint16, access, share, disposition, flags uint32, template windows.Handle) (windows.Handle, error) {
@@ -33,7 +33,7 @@ func createFile(name *uint16, access, share, disposition, flags uint32, template
 func identifyOnly() *windows.SECURITY_QUALITY_OF_SERVICE {
 	return &windows.SECURITY_QUALITY_OF_SERVICE{
 		Length:              uint32(unsafe.Sizeof(windows.SECURITY_QUALITY_OF_SERVICE{})),
-		ImpersonationLevel:  windows.SecurityImpersonation,
+		ImpersonationLevel:  windows.SecurityIdentification,
 		ContextTrackingMode: windows.SECURITY_STATIC_TRACKING,
 	}
 }

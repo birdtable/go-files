@@ -8,7 +8,7 @@ import (
 )
 
 // deviceNames is true on Windows, whose paths under \\.\, \\?\ and \??\ may name a device or a pipe.
-const deviceNames = false
+const deviceNames = true
 
 // seam, set by SeamNoIndex alone, makes Indexed read every volume as giving a file no index, which no
 // test machine's volume does, so a package's test reaches the ErrNoFileIndex refusal.
