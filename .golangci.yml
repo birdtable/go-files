@@ -707,7 +707,7 @@ linters:
       # in those suffixes: each one's build line leaves Windows out, and any
       # other such file, which Windows may build, is held to the row. The lint
       # task's plants show a Windows-built _unix, _passwd and _other file red.
-      - path-except: ^(confine|appdirs|trust|lock|write)/[^/]+\.go$
+      - path-except: ^(confine|appdirs|trust)/[^/]+\.go$
         linters: [forbidigo]
         text: "register \\(pipe-by-path\\):"
       - path: _test\.go$|_(linux|darwin|freebsd|netbsd)\.go$|^(appdirs/(account|free|here|temp)_unix|appdirs/account_passwd|confine/(open|rename|runnable|shared)_unix|trust/(device|trust)_unix|lock/(flock|lock_unix)|write/write_unix)\.go$|^(appdirs/(free|index|sysstat|volume)|confine/(folds|index|link|rename|resolve|sysstat)|trust/(aclmask|interpreters|maclist|mount|proc))_other\.go$

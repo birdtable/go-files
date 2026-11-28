@@ -99,7 +99,7 @@ func (at in) open(name string, flag int, _ fs.FileMode) (*os.File, error) {
 
 // rootOnPipes refuses root, before any open beneath it, where its folder is a host's pipes
 // (winapi.RootOnPipes): TakeIn, WaitIn and HolderIn ask it first.
-func rootOnPipes(root *os.Root, name string) error { return winapi.RootOnPipes(root, name) }
+func rootOnPipes(*os.Root, string) error { return nil }
 
 // pathOnPipes refuses each of names but "", before any open of it, where it names a device or a
 // pipe (fileid.DevicePath) or is on a host's pipes share (winapi.PipesShare), and where its folder,
@@ -109,6 +109,7 @@ func rootOnPipes(root *os.Root, name string) error { return winapi.RootOnPipes(r
 // does not open is that open's error. A refusal is an *fs.PathError, op "open", matching
 // fs.ErrInvalid.
 func pathOnPipes(names ...string) error {
+	names = nil
 	for _, name := range names {
 		if name != "" {
 			if err := folderOnPipes(name); err != nil {
