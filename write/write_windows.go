@@ -559,6 +559,23 @@ func (s sysOptions) link(root *os.Root, tmp, name string, g *grip) error {
 // root it opens by a path.
 func rootOnPipes(root *os.Root, name string) error { return winapi.RootOnPipes(root, name) }
 
-// pipesPath reports whether p names a device or a pipe (fileid.DevicePath) or is on a host's
-// pipes share (winapi.PipesShare), which openFolder refuses before any open.
-func pipesPath(p string) bool { return fileid.DevicePath(p) || winapi.PipesShare(p) }
+// folderOnPipes refuses dir and path, before any open, where either names a device or a pipe
+// (fileid.DevicePath) or is on a host's pipes share (winapi.PipesShare), and dir where the folder
+// opened there by winapi.OpenFolder, which asks for identification alone, is a host's pipes
+// (winapi.OnPipes): openFolder asks it before os.OpenRoot, whose open passes no quality of
+// service, so that open is of a folder on a disk, while no other process changes the folders above
+// it between the two opens. A folder that does not open is that open's error. A refusal is an
+// *fs.PathError, op "open", matching fs.ErrInvalid.
+func folderOnPipes(dir, path string) (err error) {
+	for _, p := range []string{dir, path} {
+		if fileid.DevicePath(p) || winapi.PipesShare(p) {
+			return &fs.PathError{Op: "open", Path: p, Err: fmt.Errorf("the path names a device or a pipe, or a host's pipes share, and nothing was opened: %w", fs.ErrInvalid)}
+		}
+	}
+	d, err := winapi.OpenFolder(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, d.Close()) }()
+	return winapi.OnPipes(d, path)
+}

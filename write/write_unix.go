@@ -144,6 +144,6 @@ func (sysOptions) link(root *os.Root, tmp, name string, _ *grip) error { return 
 // rootOnPipes refuses nothing: only Windows has a pipes' device a root can be opened on.
 func rootOnPipes(*os.Root, string) error { return nil }
 
-// pipesPath is false: off Windows no path names a device or a pipe by its spelling, and a pipe at
-// a name is refused by the open beneath the root.
-func pipesPath(string) bool { return false }
+// folderOnPipes refuses nothing: off Windows no path names a device or a pipe by its spelling, and
+// a pipe at a name is refused by the open beneath the root.
+func folderOnPipes(string, string) error { return nil }

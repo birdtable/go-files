@@ -62,6 +62,7 @@ type options struct {
 	flush      func(root *os.Root, dir string) error
 	closing    func(err error) error                  // a test's answer to the close of the grip, read only under testing.Testing()
 	remove     func(root *os.Root, name string) error // a test's remove of the name linked just in place, in linked, and of the temp name after the link
+	goOpen     func(dir string)                       // handed each folder openFolder opens by os.OpenRoot, before the open
 	sysOptions                                        // what one system alone reads
 }
 
@@ -259,7 +260,7 @@ func File(path string, content []byte, opts ...Option) error {
 // leaves the old file. On Windows its rename is tried again for about 600 ms,
 // as File's is.
 func FileFrom(path string, src io.Reader, opts ...Option) error {
-	root, err := openFolder(filepath.Dir(path), path)
+	root, err := openFolder(filepath.Dir(path), path, settle(opts))
 	if err != nil {
 		return err
 	}
@@ -286,17 +287,19 @@ func FileIn(root *os.Root, name string, content []byte, opts ...Option) error {
 
 // openFolder opens dir, the folder of path, as the root a call of write that takes a path works
 // through. dir and path are refused before any open where either names a device or a pipe or is
-// on a host's pipes share (pipesPath), and the root opened where its
-// folder is a host's pipes (rootOnPipes), before any name beneath it is opened, so each open
-// beneath it is of a name in a folder on a disk. A refusal is an *fs.PathError, op "open",
-// matching fs.ErrInvalid.
-func openFolder(dir, path string) (*os.Root, error) {
-	for _, p := range []string{dir, path} {
-		if pipesPath(p) {
-			return nil, &fs.PathError{Op: "open", Path: p, Err: fmt.Errorf("the path names a device or a pipe, or a host's pipes share, and nothing was opened: %w", fs.ErrInvalid)}
-		}
+// on a host's pipes share, and dir where the folder an open of it that asks for identification
+// alone reaches is a host's pipes (folderOnPipes), before Go's open of it; the root Go opens is
+// refused where its folder is a host's pipes (rootOnPipes), before any name beneath it is opened,
+// so each open beneath it is of a name in a folder on a disk. A refusal is an *fs.PathError, op
+// "open", matching fs.ErrInvalid.
+func openFolder(dir, path string, o options) (*os.Root, error) {
+	if err := folderOnPipes(dir, path); err != nil {
+		return nil, err
 	}
-	root, err := os.OpenRoot(dir) //nolint:forbidigo // the caller's folder, named as no device, pipe or pipes share; Go's open passes no quality of service, and a folder it reaches on a host's pipes, through a link, is refused next, before any open beneath it
+	if o.goOpen != nil && testing.Testing() {
+		o.goOpen(dir)
+	}
+	root, err := os.OpenRoot(dir) //nolint:forbidigo // the caller's folder, read first by folderOnPipes as no device, pipe or pipes share; Go's open passes no quality of service, so a link changed above it since that read may lead it to a pipe, whose root is refused next, before any open beneath it
 	if err != nil {
 		return nil, err
 	}

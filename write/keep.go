@@ -40,7 +40,7 @@ func Keep(file, folder, name string, opts ...Option) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root, err := openFolder(folder, filepath.Join(folder, name))
+	root, err := openFolder(folder, filepath.Join(folder, name), o)
 	if err != nil {
 		return "", errors.Join(err, src.Close())
 	}
@@ -139,7 +139,7 @@ func plainName(name string) error {
 }
 
 func source(file string, o options) (*os.File, fs.FileInfo, error) {
-	dir, err := openFolder(filepath.Dir(file), file)
+	dir, err := openFolder(filepath.Dir(file), file, o)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -171,7 +171,7 @@ func PutBack(kept, file string, holds [sha256.Size]byte, opts ...Option) error {
 	if err != nil {
 		return err
 	}
-	root, err := openFolder(filepath.Dir(file), file)
+	root, err := openFolder(filepath.Dir(file), file, settle(opts))
 	if errors.Is(err, fs.ErrInvalid) { // a device, a pipe or a pipes share, not a change
 		return errors.Join(fmt.Errorf("%s: %w", file, err), src.Close())
 	}

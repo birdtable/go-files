@@ -105,9 +105,44 @@ func pipeRefused(t *testing.T, call, name, folder string, err error, reached fun
 	}
 }
 
-// Each call of write that takes a path, File, FileFrom, Keep (at its copy and at its source),
-// PutBack (at the file and at the copy) and Swap, given a pipe's name in a folder whose name is a
-// host's pipes, by the pipes share's name in any spelling, by \\.\pipe\, or by a junction to the
+// pathCall is a call of write that takes a path, tried at pipe.
+type pathCall struct {
+	call string
+	try  func(pipe string) error
+}
+
+// pathCalls are the calls of write that take a path, File, FileFrom, Keep (at its copy and at its
+// source), PutBack (at the file and at the copy) and Swap, each tried at a path, with a file on a
+// disk for the side the path is not, and opts given to each.
+func pathCalls(t *testing.T, opts ...Option) []pathCall {
+	t.Helper()
+	disk := t.TempDir()
+	file := filepath.Join(disk, "file")
+	if err := os.WriteFile(file, []byte("kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	holds := sha256.Sum256([]byte("kept\n"))
+	return []pathCall{
+		{"File", func(pipe string) error { return File(pipe, []byte("x"), opts...) }},
+		{"FileFrom", func(pipe string) error { return FileFrom(pipe, strings.NewReader("x"), opts...) }},
+		{"Keep, its copy", func(pipe string) error {
+			_, err := Keep(file, filepath.Dir(pipe), filepath.Base(pipe), opts...)
+			return err
+		}},
+		{"Keep, its source", func(pipe string) error {
+			_, err := Keep(pipe, disk, "copy", opts...)
+			return err
+		}},
+		{"PutBack, the file", func(pipe string) error { return PutBack(file, pipe, holds, opts...) }},
+		{"PutBack, the copy", func(pipe string) error { return PutBack(pipe, file, holds, opts...) }},
+		{"Swap", func(pipe string) error {
+			return Swap(pipe, filepath.Join(filepath.Dir(pipe), "fresh"), filepath.Join(filepath.Dir(pipe), "aside"), opts...)
+		}},
+	}
+}
+
+// Each call of write that takes a path (pathCalls), given a pipe's name in a folder whose name is
+// a host's pipes, by the pipes share's name in any spelling, by \\.\pipe\, or by a junction to the
 // pipes' own folder, refuses it, matching fs.ErrInvalid, and the pipe sees no client: the name is
 // refused before any open, and a folder a link leads to the pipes by its own handle, before any
 // open beneath it.
@@ -117,35 +152,40 @@ func pipeRefused(t *testing.T, call, name, folder string, err error, reached fun
 // program.
 func TestEachCallByPathRefusesAPipesFolderAndThePipeSeesNoClient(t *testing.T) {
 	t.Parallel()
-	disk := t.TempDir()
-	file := filepath.Join(disk, "file")
-	if err := os.WriteFile(file, []byte("kept\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	holds := sha256.Sum256([]byte("kept\n"))
 	for _, folder := range pipesFolders(t) {
-		for _, c := range []struct {
-			call string
-			try  func(pipe string) error
-		}{
-			{"File", func(pipe string) error { return File(pipe, []byte("x")) }},
-			{"FileFrom", func(pipe string) error { return FileFrom(pipe, strings.NewReader("x")) }},
-			{"Keep, its copy", func(pipe string) error {
-				_, err := Keep(file, filepath.Dir(pipe), filepath.Base(pipe))
-				return err
-			}},
-			{"Keep, its source", func(pipe string) error {
-				_, err := Keep(pipe, disk, "copy")
-				return err
-			}},
-			{"PutBack, the file", func(pipe string) error { return PutBack(file, pipe, holds) }},
-			{"PutBack, the copy", func(pipe string) error { return PutBack(pipe, file, holds) }},
-			{"Swap", func(pipe string) error {
-				return Swap(pipe, filepath.Join(filepath.Dir(pipe), "fresh"), filepath.Join(filepath.Dir(pipe), "aside"))
-			}},
-		} {
+		for _, c := range pathCalls(t) {
 			name, reached := pipeListening(t)
 			pipeRefused(t, c.call, name, folder, c.try(filepath.Join(folder, name)), reached)
+		}
+	}
+}
+
+// Each call of write that takes a path (pathCalls), given a name below a pipe by a junction to the
+// pipes' own folder, so that the folder it works in is that pipe, refuses it, matching
+// fs.ErrInvalid, before Go's open of the folder, os.OpenRoot: the folder is read first by its own
+// handle, from an open that asks for identification alone. That open is the pipe's client, and
+// writes nothing; what the pipe saw is logged as native.
+//
+// What it costs when this fails: Go's open, which passes no quality of service, reaches the pipe
+// as its client, and the pipe's server may act as the program.
+func TestEachCallByPathReadsAFolderThatIsAPipeAtIdentificationBeforeGoOpensIt(t *testing.T) {
+	t.Parallel()
+	j := pipesJunction(t)
+	if j == "" {
+		t.Fatal("no junction to the pipes' folder was made, so nothing here is shown")
+	}
+	var seen []string
+	for _, c := range pathCalls(t, goOpenWith(func(dir string) { seen = append(seen, dir) })) {
+		name, reached := pipeListening(t)
+		err := c.try(filepath.Join(j, name, "x"))
+		if !errors.Is(err, fs.ErrInvalid) {
+			t.Errorf("%s below the pipe %s by %s: %v, and want it refused, matching fs.ErrInvalid", c.call, name, j, err)
+		}
+		t.Logf("native: %s below the pipe %s: %v; %v", c.call, name, err, reached())
+	}
+	for _, dir := range seen {
+		if strings.HasPrefix(strings.ToLower(dir), strings.ToLower(j)) {
+			t.Errorf("Go's open, os.OpenRoot, opened %s, below the junction to the pipes' folder, before the folder was read by its own handle", dir)
 		}
 	}
 }
