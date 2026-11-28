@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
+	"os/exec" //nolint:depguard // cli.process.1: the test starts unshare, with this test binary again in it, as trust's namespace rows do; the module has no runner
 	"path/filepath"
 	"slices"
 	"strconv"

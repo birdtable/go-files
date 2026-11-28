@@ -18,7 +18,7 @@ func held(t *testing.T, path string) (magic uint32, ino uint64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(fd) //nolint:errcheck // an O_PATH descriptor
+	defer unix.Close(fd)
 	var sf unix.Statfs_t
 	var st unix.Stat_t
 	if err := unix.Fstatfs(fd, &sf); err != nil {
@@ -27,7 +27,7 @@ func held(t *testing.T, path string) (magic uint32, ino uint64) {
 	if err := unix.Fstat(fd, &st); err != nil {
 		t.Fatal(err)
 	}
-	return uint32(sf.Type), st.Ino //nolint:gosec // G115: a magic number is the low 32 bits of f_type
+	return uint32(sf.Type), st.Ino
 }
 
 // What it costs when this fails: a tmpfs mounted over /proc, or a folder of a procfs, as a
@@ -46,7 +46,7 @@ func TestRootHoldsAProcfsByItsMagicAndItsRootInode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Root of /proc: %v", err)
 	}
-	unix.Close(fd) //nolint:errcheck,gosec // G104: a descriptor not kept
+	unix.Close(fd)
 	for _, row := range []struct{ path, why string }{
 		{"/sys", "sysfs's root, by its magic"},
 		{pid, "this process's procfs folder, not its root, by its inode"},
@@ -67,15 +67,15 @@ func TestBeneathFollowsNoMagicLinkButFollowsSelf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(root) //nolint:errcheck // an O_PATH descriptor
+	defer unix.Close(root)
 	fd, err := Beneath(root, "self/fd", unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC)
 	if err != nil {
 		t.Fatalf("Beneath /proc, self/fd: %v, and want it opened, through the plain link self", err)
 	}
-	unix.Close(fd) //nolint:errcheck,gosec // G104: a descriptor not kept
+	unix.Close(fd)
 	if fd, err := Beneath(root, "self/cwd", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC); !errors.Is(err, unix.ELOOP) {
 		if err == nil {
-			unix.Close(fd) //nolint:errcheck,gosec // G104: a descriptor not kept
+			unix.Close(fd)
 		}
 		t.Errorf("Beneath /proc, self/cwd, a magic link: %v, and want ELOOP", err)
 	}

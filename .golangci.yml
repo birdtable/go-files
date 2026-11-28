@@ -624,15 +624,16 @@ linters:
       - path: ^confine/[^/]+_linux(_test)?\.go$
         linters: [forbidigo]
         text: "register \\(confine-to-folder\\):"
-      # trust reads
-      # /proc/self/mountinfo by one openat2 from its held /proc root, with
-      # RESOLVE_NO_XDEV and RESOLVE_NO_MAGICLINKS, so no file mounted or linked
-      # there is read as the kernel's. By file, at the module's root, and by
-      # the call's own source line: openat2 anywhere else in trust is red.
-      - path: ^trust/mount_linux\.go$
+      # internal/procfs opens a file beneath its held /proc root by one
+      # openat2 that sets RESOLVE_NO_XDEV and RESOLVE_NO_MAGICLINKS itself, so
+      # no caller can leave them out and no file mounted or linked there is
+      # read as the kernel's: trust reads self/mountinfo and confine self/fd
+      # through it. By file, at the module's root, and by the call's own
+      # source line: openat2 anywhere else, trust among them, is red.
+      - path: ^internal/procfs/procfs_linux\.go$
         linters: [forbidigo]
         text: "register \\(confine-to-folder\\):"
-        source: 'unix\.Openat2\(root, "self/mountinfo", &how\)'
+        source: 'unix\.Openat2\(root, name, &how\)'
       # The path-lock row holds
       # outside lock's and write's two system files each. lock locks the file
       # it opened and checked. Append holds its log on its own
