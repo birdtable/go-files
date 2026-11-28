@@ -95,8 +95,11 @@ func OpenPath(path string, follow bool) (*os.File, error) {
 // OpenFolder is os.Open of a folder by CreateFile with Identify, the Open a make by path is given:
 // path opened to read, sharing read, write and delete, every link on the way and at its last name
 // followed, as os.Open opens a folder, so the open lets no pipe's server reached on the way act
-// as the caller. Through a link to a pipe on this host's own pipes share, \\localhost\pipe\<name>,
-// the share's server opens the pipe at the level asked, so its server gets identification alone
+// as the caller. A link to another host's share, \\host\share\..., is the same case as a UNC path
+// by name, which is not refused: the open connects to that host and authenticates the caller to
+// it, and planting the link needs the right to make links. Through a link to a pipe on this host's
+// own pipes share, \\localhost\pipe\<name>, the share's server opens the pipe at the level asked,
+// so its server gets identification alone
 // (TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone, read natively in CI run
 // 46147851244). An error is an *fs.PathError.
 func OpenFolder(path string) (*os.File, error) {
