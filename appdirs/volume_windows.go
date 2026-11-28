@@ -81,7 +81,7 @@ func onVolume(h windows.Handle) error {
 	if err != nil {
 		return err
 	}
-	if ft != windows.FILE_TYPE_DISK && ft != windows.FILE_TYPE_PIPE && ft != windows.FILE_TYPE_CHAR {
+	if ft != windows.FILE_TYPE_DISK {
 		return fmt.Errorf("it leads to a pipe or a device, not a file or a folder on a volume: %w", fs.ErrInvalid)
 	}
 	return nil

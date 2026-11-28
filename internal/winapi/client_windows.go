@@ -170,7 +170,7 @@ func linkTarget(b []byte) (string, error) {
 		return "", fmt.Errorf("a reparse point of tag %#x, neither a link nor a junction: %w", tag, fs.ErrNotExist)
 	}
 	off, size := int(le.Uint16(b[8:])), int(le.Uint16(b[10:]))
-	if off+size > len(names) {
+	if off%2 != 0 || size%2 != 0 || off+size > len(names) {
 		return "", fmt.Errorf("the substitute name at %d, %d bytes, lies outside the %d bytes of names", off, size, len(names))
 	}
 	u := make([]uint16, size/2)
@@ -192,7 +192,7 @@ func dosTarget(s string) string {
 	case !ok:
 		return s
 	case len(rest) >= 2 && rest[1] == ':':
-		return s
+		return rest
 	case strings.HasPrefix(rest, `UNC\`):
 		return `\\` + rest[4:]
 	}
