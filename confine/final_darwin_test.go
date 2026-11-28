@@ -1,11 +1,15 @@
 package confine
 
 import (
+	"bytes"
+	"encoding/xml"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec" //nolint:depguard // cli.process.1: the test makes and attaches an HFS+ disk image with hdiutil; the module has no runner
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -55,9 +59,12 @@ func TestOnMacOSFinalOfANameThisAccountMayNotReadIsErrPermission(t *testing.T) {
 }
 
 // volume makes a 20 MB disk image img of the file system kind, hdiutil's -fs, which needs no root,
-// attaches it on mnt, a folder it makes, and checks that fstatfs names mnt's volume want; it is
-// detached when the test ends, after any volume attached beneath it. hdiutil is on every Mac, so
-// nothing here skips: a Mac that cannot make or attach one fails the test.
+// attaches it on mnt, a folder it makes, and checks that fstatfs names mnt's volume want. It is
+// detached when the test ends, however the test ends, by detach: the detach is registered before
+// the attach runs and finds the image by its path, as trust's tests do (go-files#41), and as
+// cleanups run last registered first, a volume attached beneath another comes off before it, so
+// the outer image is never held busy by the inner. hdiutil is on every Mac, so nothing here skips:
+// a Mac that cannot make or attach one fails the test.
 func volume(t *testing.T, kind, want, img, mnt string) {
 	t.Helper()
 	if out, err := exec.CommandContext(t.Context(), "/usr/bin/hdiutil", "create", "-fs", kind, "-size", "20m", "-volname", "final", img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
@@ -66,18 +73,179 @@ func volume(t *testing.T, kind, want, img, mnt string) {
 	if err := os.Mkdir(mnt, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		detach(t, img, ejects())
+		if disk, err := imageDisk(img); err == nil && disk != "" {
+			holders(t, mnt)
+		}
+	})
 	if out, err := exec.CommandContext(t.Context(), "/usr/bin/hdiutil", "attach", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
 		t.Fatalf("hdiutil attach: %v: %s", err, out)
 	}
-	t.Cleanup(func() {
-		if out, err := exec.Command("/usr/bin/hdiutil", "detach", "-force", mnt).CombinedOutput(); err != nil { //nolint:noctx,gosec // the test's context has ended by its cleanup; G204: hdiutil by its full path, on the test's own folder
-			t.Errorf("the image's cleanup, not the rule: hdiutil detach of %s: %v: %s", mnt, err, out)
-		}
-	})
 	var st unix.Statfs_t
 	if err := unix.Statfs(mnt, &st); err != nil || unix.ByteSliceToString(st.Fstypename[:]) != want || unix.ByteSliceToString(st.Mntonname[:]) != mnt {
 		t.Fatalf("the image on %s: type %q on %q, %v, and want %s mounted on it", mnt, unix.ByteSliceToString(st.Fstypename[:]), unix.ByteSliceToString(st.Mntonname[:]), err, want)
 	}
+}
+
+// holders logs, for an image its cleanup could not take off, every volume still mounted on or
+// beneath mnt, as getfsstat lists them, and what lsof says this account has open there, so a red
+// run names what held the image.
+func holders(t testing.TB, mnt string) {
+	t.Helper()
+	var on []string
+	n, err := unix.Getfsstat(nil, unix.MNT_NOWAIT)
+	if err == nil {
+		all := make([]unix.Statfs_t, n)
+		if n, err = unix.Getfsstat(all, unix.MNT_NOWAIT); err == nil {
+			for _, m := range all[:n] {
+				if at := unix.ByteSliceToString(m.Mntonname[:]); at == mnt || strings.HasPrefix(at, mnt+"/") {
+					on = append(on, unix.ByteSliceToString(m.Fstypename[:])+" from "+unix.ByteSliceToString(m.Mntfromname[:])+" on "+at)
+				}
+			}
+		}
+	}
+	out, lerr := exec.Command("/usr/sbin/lsof", "-n", "-P", "+f", "--", mnt).CombinedOutput() //nolint:noctx,gosec // the test's context has ended by its cleanup; G204: lsof by its full path, on the test's own folder
+	t.Logf("the image's cleanup, not the rule: mounted on or beneath %s: %q (%v); lsof of it (%v):\n%s", mnt, on, err, lerr, out)
+}
+
+// ejects are the ways tried, in order, to take an image off, as trust's tests try them: diskutil's
+// forced eject, three times, as it fails once in a while on a busy Mac ("Resource busy") and
+// passes on the next try, and last hdiutil's forced detach, which goes to the image's device by
+// another road and takes it off even when busy. There is no wait between tries: each one is a
+// round trip to the system's disk daemon.
+func ejects() [][]string {
+	return [][]string{
+		{"/usr/sbin/diskutil", "eject", "force"},
+		{"/usr/sbin/diskutil", "eject", "force"},
+		{"/usr/sbin/diskutil", "eject", "force"},
+		{"/usr/bin/hdiutil", "detach", "-force"},
+	}
+}
+
+// detach takes the image at img off by the first of ways that does, each given the image's own
+// disk last, as hdiutil names it; it is trust's tests' detach. A way that passes and leaves the
+// image attached counts as failed, and the next is tried. Tries that failed before the image came
+// off are logged, not failed: the rule was judged before the cleanup. When the image is still
+// attached after every way, the test fails, and says it is the image's cleanup, not the rule. An
+// image not attached is left as it is.
+func detach(t testing.TB, img string, ways [][]string) {
+	t.Helper()
+	disk, err := imageDisk(img)
+	var failed []string
+	for _, way := range ways {
+		if err != nil || disk == "" {
+			break
+		}
+		out, runErr := exec.Command(way[0], append(way[1:len(way):len(way)], disk)...).CombinedOutput() //nolint:noctx,gosec // the test's context has ended by its cleanup; G204: diskutil and hdiutil by their full paths, on the test's own image
+		was := disk
+		if disk, err = imageDisk(img); err == nil && disk == "" {
+			if len(failed) > 0 {
+				t.Logf("the image's cleanup, not the rule: %s came off by %s after %d tries failed:\n%s", img, strings.Join(way, " "), len(failed), strings.Join(failed, "\n"))
+			}
+			return
+		}
+		if runErr == nil {
+			runErr = errors.New("it passed, and the image is still attached")
+		}
+		failed = append(failed, fmt.Sprintf("%s %s: %v: %s", strings.Join(way, " "), was, runErr, bytes.TrimSpace(out)))
+	}
+	switch {
+	case err != nil:
+		t.Errorf("the image's cleanup, not the rule: %v", err)
+	case disk != "":
+		t.Errorf("the image's cleanup, not the rule: %s is still attached as %s, and every way to take it off failed:\n%s", img, disk, strings.Join(failed, "\n"))
+	}
+}
+
+// imageDisk is the disk hdiutil info names first for the image attached from img, its own, or ""
+// when no image from img is attached.
+func imageDisk(img string) (string, error) {
+	out, err := exec.Command("/usr/bin/hdiutil", "info", "-plist").Output() //nolint:noctx // run from cleanups too, after the test's context has ended
+	if err != nil {
+		return "", fmt.Errorf("hdiutil info: %w", err)
+	}
+	var doc plist
+	if err := xml.Unmarshal(out, &doc); err != nil || len(doc.Items) != 1 {
+		return "", fmt.Errorf("hdiutil info -plist is not one plist: %w", err)
+	}
+	images, _ := doc.Items[0].get("images")
+	for _, image := range images.Items {
+		if path, _ := image.get("image-path"); path.Text != img {
+			continue
+		}
+		entities, _ := image.get("system-entities")
+		for _, e := range entities.Items {
+			if dev, ok := e.get("dev-entry"); ok && dev.Text != "" {
+				return dev.Text, nil
+			}
+		}
+		return "", fmt.Errorf("hdiutil info names the image %s attached, with no disk", img)
+	}
+	return "", nil
+}
+
+// plist is a node of a property list as hdiutil writes one: an element, its text, and its children.
+type plist struct {
+	XMLName xml.Name
+	Text    string  `xml:",chardata"`
+	Items   []plist `xml:",any"`
+}
+
+// get is the value after the key named in the dict p, and whether it is there.
+func (p plist) get(key string) (plist, bool) {
+	for i := 0; i+1 < len(p.Items); i += 2 {
+		if p.Items[i].XMLName.Local == "key" && p.Items[i].Text == key {
+			return p.Items[i+1], true
+		}
+	}
+	return plist{}, false
+}
+
+// said is a test's TB that keeps what detach logs and fails instead of saying it.
+type said struct {
+	testing.TB
+	logs, errs []string
+}
+
+func (s *said) Logf(format string, args ...any) {
+	s.logs = append(s.logs, fmt.Sprintf(format, args...))
+}
+
+func (s *said) Errorf(format string, args ...any) {
+	s.errs = append(s.errs, fmt.Sprintf(format, args...))
+}
+
+// An image attached beneath another's volume, as the nested test attaches APFS beneath HFS+, comes
+// off before it when the test ends, and both are off once it has; an image no way takes off fails
+// the test, and the failure names its disk.
+//
+// What it costs when this fails: the nested test fails now and then on a busy Mac for its cleanup,
+// not for the rule it checks, as main did on 28 Nov ("Resource busy"); or an image left attached
+// passes the test, and stays attached for days, its folder held (go-files#41).
+func TestOnMacOSANestedImageComesOffBeforeTheOneItIsAttachedBeneath(t *testing.T) {
+	t.Parallel()
+	d := finalTemp(t)
+	outer, inner := filepath.Join(d, "hfs.dmg"), filepath.Join(d, "apfs.dmg")
+	// The parent's cleanup runs once its parallel subtest has ended, and its cleanups with it.
+	t.Cleanup(func() {
+		for _, img := range []string{inner, outer} {
+			if disk, err := imageDisk(img); disk != "" || err != nil {
+				t.Errorf("after the test that attached it ended, %s is still attached as %q (%v), and want no image attached", img, disk, err)
+			}
+		}
+	})
+	t.Run("nested", func(t *testing.T) {
+		t.Parallel()
+		mnt := filepath.Join(d, "hfs")
+		volume(t, "JHFS+", "hfs", outer, mnt)
+		volume(t, "APFS", "apfs", inner, filepath.Join(mnt, "m"))
+		stuck := &said{TB: t}
+		detach(stuck, inner, [][]string{{"/usr/bin/false"}})
+		if len(stuck.errs) != 1 || !strings.Contains(stuck.errs[0], inner+" is still attached as /dev/disk") {
+			t.Errorf("no way took the image off, and the test failed with %q, and want one failure that it is still attached", stuck.errs)
+		}
+	})
 }
 
 // hfsLinked attaches a journaled HFS+ image on d/hfs (HFS+ gives a folder a second name only where
