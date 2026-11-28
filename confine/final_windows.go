@@ -5,6 +5,7 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/birdtable/go-files/internal/winapi"
 	"golang.org/x/sys/windows"
 )
 
@@ -16,14 +17,15 @@ func finalVolumes(*os.File, string) error { return nil }
 
 // openFinal opens path for its attributes alone, sharing all, with FILE_FLAG_BACKUP_SEMANTICS so
 // a folder opens as a file does and FILE_FLAG_OPEN_REPARSE_POINT so a link or junction at the last
-// name is opened itself.
+// name is opened itself, by winapi.CreateFile, which asks for identification alone, so a pipe a
+// link on the way leads to learns who the caller is and may act as it in nothing.
 func openFinal(path string) (*os.File, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
-		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	h, err := winapi.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
 	if err != nil {
 		return nil, err
 	}

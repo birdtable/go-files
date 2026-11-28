@@ -70,7 +70,7 @@ const opFinal = "final"
 // as on macOS through a folder with a second name. A caller that cannot promise that judges the
 // path with trust.Path first.
 func Final(path string) (string, error) {
-	return final(path, finalOf, os.Lstat)
+	return final(path, finalOf, sysLstat)
 }
 
 // final is Final with read, the system's answer for the open file, and lstat, the look at that
