@@ -58,7 +58,10 @@ const opFinal = "final"
 // not there with the system's error, matching fs.ErrNotExist. On macOS, whose open for F_GETPATH
 // needs read access, a file or folder this account may not read is refused with the system's
 // error, matching fs.ErrPermission; Linux, opening with O_PATH, answers it. The answer is a name
-// read now: a rename after it is not seen.
+// read now: a rename after it is not seen. And it is a key only for a path whose folders no other
+// account or process renames while Final runs: a folder of the path renamed during the call and put
+// back may have Final answer another name of what it opened, as on macOS through a folder with a
+// second name. A caller that cannot promise that judges the path with trust.Path first.
 func Final(path string) (string, error) {
 	return final(path, finalOf, os.Lstat)
 }
