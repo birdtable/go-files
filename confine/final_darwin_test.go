@@ -8,6 +8,9 @@ import (
 	"testing"
 )
 
+// finalRefusesASecondName is whether Final refuses a file with a second name here: macOS refuses a file with a second name, as F_GETPATH answers the name looked at last.
+const finalRefusesASecondName = true
+
 func TestOnMacOSFinalAnswersOneNameThroughTheDataVolumesFirmlink(t *testing.T) {
 	t.Parallel()
 	tmp := finalTemp(t)

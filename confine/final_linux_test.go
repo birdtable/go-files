@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// finalRefusesASecondName is whether Final refuses a file with a second name here: Linux answers a file with a second name by the name it was opened by.
+const finalRefusesASecondName = false
+
 func TestOnLinuxFinalAnswersANameThisAccountMayNotRead(t *testing.T) {
 	t.Parallel()
 	tmp := finalTemp(t)

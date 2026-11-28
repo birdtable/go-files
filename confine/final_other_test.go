@@ -7,6 +7,9 @@ import (
 	"testing"
 )
 
+// finalRefusesASecondName is whether Final refuses a file with a second name here: no system here answers Final at all.
+const finalRefusesASecondName = false
+
 func TestFinalIsErrUnsupportedOffLinuxMacOSAndWindows(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()

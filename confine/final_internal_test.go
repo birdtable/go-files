@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -230,7 +229,7 @@ func TestFinalOfAFileWithASecondNameAnswersTheNameOpenedOrOnMacOSIsRefused(t *te
 	}
 	for _, p := range []string{a, b} {
 		got, err := final(p, look)
-		if runtime.GOOS == "darwin" {
+		if finalRefusesASecondName {
 			if !errors.Is(err, errors.ErrUnsupported) || got != "" {
 				t.Errorf("Final on macOS of %s, a file with a second name, while %s is looked at = %q, %v, and want errors.ErrUnsupported", p, b, got, err)
 			}
