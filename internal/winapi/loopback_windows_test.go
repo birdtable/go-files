@@ -121,7 +121,7 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 		name    string
 		link    bool   // whether the open is through a link to the share's name
 		kind    uint32 // the link's kind
-		reaches bool   // whether every open by this way reaches the pipe, as run 46147851244 read
+		reaches bool   // whether every open by this way reaches the pipe, as run 46150543409 read
 	}{
 		{"the share's name", false, 0, true},
 		{"a file's link", true, 0, true},

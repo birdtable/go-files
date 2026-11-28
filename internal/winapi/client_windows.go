@@ -101,7 +101,7 @@ func OpenPath(path string, follow bool) (*os.File, error) {
 // own pipes share, \\localhost\pipe\<name>, the share's server opens the pipe at the level asked,
 // so its server gets identification alone
 // (TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone, read natively in CI run
-// 46147851244). An error is an *fs.PathError.
+// 46150543409). An error is an *fs.PathError.
 func OpenFolder(path string) (*os.File, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
