@@ -61,7 +61,7 @@ func mkdirFresh(root *os.Root, prefix string, random func() string, reached func
 	if err := freshPrefix(prefix); err != nil {
 		return nil, "", &fs.PathError{Op: "mkdir", Path: prefix, Err: err}
 	}
-	if err := rootOnPipes(root, prefix); err != nil && root == nil {
+	if err := rootOnPipes(root, prefix); err != nil {
 		return nil, "", err
 	}
 	w := walk{perm: 0o700, kind: ownerOnly, reached: reached, listless: listless}

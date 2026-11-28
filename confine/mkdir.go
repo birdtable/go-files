@@ -127,7 +127,7 @@ func mkdir(root *os.Root, name string, perm fs.FileMode, reached func(step strin
 
 // mkdirAs is mkdir, each folder made listed as k says.
 func mkdirAs(root *os.Root, name string, perm fs.FileMode, k kind, reached func(step string), listless bool) (*os.Root, error) {
-	if err := rootOnPipes(root, name); err != nil && root == nil {
+	if err := rootOnPipes(root, name); err != nil {
 		return nil, err
 	}
 	if name == "." {

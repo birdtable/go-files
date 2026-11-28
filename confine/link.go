@@ -50,7 +50,7 @@ func LinkFile(root *os.Root, target, at string) error {
 
 // linkChecked makes at a link to target, a folder or a file, past LinkFolder's checks.
 func linkChecked(root *os.Root, target, at string, folder bool) error {
-	if err := rootOnPipes(root, at); err != nil && root == nil {
+	if err := rootOnPipes(root, at); err != nil {
 		return err
 	}
 	return linkAs(root, target, target, at, folder)
