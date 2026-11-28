@@ -23,10 +23,13 @@ const opFinal = "final"
 // Each system answers from its own call on the handle: Windows from GetFinalPathNameByHandle's
 // normalized name with its drive, without the \\?\ prefix where the name is shorter than MAX_PATH
 // and GetFullPathName gives it back unchanged, as it does not a name that ends in a dot or a space
-// or a device name; macOS from fcntl's F_GETPATH; Linux from the link /proc/self/fd/<n>. Off those
-// three, and where the call fails or answers no absolute path, as on Linux with no /proc or with
-// a /proc/self/fd that fstatfs does not show is a procfs, it refuses with an *fs.PathError
-// matching errors.ErrUnsupported, and never fs.ErrNotExist. The answer is then looked at with
+// or a device name; macOS from fcntl's F_GETPATH; Linux from the link /proc/self/fd/<n>, read
+// beneath a /proc held to a procfs's root by fstatfs's magic and its inode, by openat2 crossing no
+// mount and following no magic link, as trust reads /proc. Off those three, and where the call
+// fails or answers no absolute path, as on Linux with no /proc, with a /proc that is not a procfs's
+// root, with a mount on the way to /proc/self/fd, or with no openat2 (before Linux 5.6, or refused
+// by a seccomp filter), it refuses with an *fs.PathError matching errors.ErrUnsupported, and never
+// fs.ErrNotExist. The answer is then looked at with
 // os.Lstat and held against the open file by os.SameFile: a name that is no longer the file
 // opened, renamed or removed between the open and the read, is refused with ErrChanged, which
 // matches ErrOutside. On a Windows volume that gives no file index os.SameFile has nothing to
@@ -35,7 +38,10 @@ const opFinal = "final"
 // A file with a second name, by a hard link, answers on Linux and Windows the name it was opened
 // by, as does a file reached through a bind mount on Linux. macOS's F_GETPATH answers whichever of
 // a file's names any process looked at last, which may be in another folder than path's, so on
-// macOS a file, not a folder, with more than one name is refused, matching errors.ErrUnsupported.
+// macOS a file, not a folder, with more than one name is refused, matching errors.ErrUnsupported:
+// its count of names is read from the open file after the name, and again from the answer's name
+// after that, and a count above one either time refuses it, so a second name linked and unlinked
+// between the reads is counted.
 // On Linux, in a folder that folds case (Folds tells it), the kernel answers the spelling the name
 // was first looked up by since it entered its cache, which may not be the stored one, so a caller
 // keying a name there folds the answer itself.
@@ -46,12 +52,12 @@ const opFinal = "final"
 // error, matching fs.ErrPermission; Linux, opening with O_PATH, answers it. The answer is a name
 // read now: a rename after it is not seen.
 func Final(path string) (string, error) {
-	return final(path, finalOf)
+	return final(path, finalOf, os.Lstat)
 }
 
-// final is Final with read, the system's answer for the open file, passed in so a test of this
-// package hands it another.
-func final(path string, read func(*os.File) (string, error)) (string, error) {
+// final is Final with read, the system's answer for the open file, and lstat, the look at that
+// answer's name, passed in so a test of this package hands it others.
+func final(path string, read func(*os.File) (string, error), lstat func(string) (fs.FileInfo, error)) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: fmt.Errorf("it is not an absolute path: %w", errors.Join(fs.ErrInvalid, ErrOutside))}
 	}
@@ -69,7 +75,9 @@ func final(path string, read func(*os.File) (string, error)) (string, error) {
 	case !filepath.IsAbs(name):
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: fmt.Errorf("the system named what it opened %q, which is not an absolute path: %w", name, errors.ErrUnsupported)}
 	}
-	// held is read after the name, so a second name of the file that the name may be is counted.
+	// held is read after the name, and got after held, and each is counted by finalHeld: a second
+	// name that the name may be, linked and unlinked by another process between the reads, is
+	// counted by one of them, as it is there when the name is read and again when got is.
 	held, err := f.Stat()
 	if err != nil {
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
@@ -77,12 +85,15 @@ func final(path string, read func(*os.File) (string, error)) (string, error) {
 	if err := finalHeld(held); err != nil {
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
 	}
-	got, err := os.Lstat(name)
+	got, err := lstat(name)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
 	}
 	if err != nil || !os.SameFile(held, got) {
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: fmt.Errorf("%w: the system named what it opened %q, and that name is not the file opened now", ErrChanged, name)}
+	}
+	if err := finalHeld(got); err != nil {
+		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
 	}
 	return name, nil
 }

@@ -174,12 +174,12 @@ func TestFinalRefusesANameThatIsNotTheFileOpened(t *testing.T) {
 		}
 	}
 	for _, answered := range []string{other, filepath.Join(tmp, "gone"), file + " (deleted)"} {
-		_, err := final(file, func(*os.File) (string, error) { return answered, nil })
+		_, err := final(file, func(*os.File) (string, error) { return answered, nil }, os.Lstat)
 		if !errors.Is(err, ErrChanged) || !errors.Is(err, ErrOutside) {
 			t.Errorf("Final where the system answers %q: %v, and want ErrChanged and ErrOutside", answered, err)
 		}
 	}
-	if got, err := final(file, func(*os.File) (string, error) { return file, nil }); err != nil || got != file {
+	if got, err := final(file, func(*os.File) (string, error) { return file, nil }, os.Lstat); err != nil || got != file {
 		t.Errorf("Final where the system answers the file's own name = %q, %v, and want it with no error", got, err)
 	}
 }
@@ -197,7 +197,7 @@ func TestFinalRefusesAnAnswerTheSystemCannotGiveAsUnsupported(t *testing.T) {
 		"a relative name": func(*os.File) (string, error) { return "anon_inode:[eventfd]", nil },
 		"an empty name":   func(*os.File) (string, error) { return "", nil },
 	} {
-		_, err := final(file, read)
+		_, err := final(file, read, os.Lstat)
 		if !errors.Is(err, errors.ErrUnsupported) {
 			t.Errorf("Final where the system answers %s: %v, and want errors.ErrUnsupported", why, err)
 		}
@@ -228,7 +228,7 @@ func TestFinalOfAFileWithASecondNameAnswersTheNameOpenedOrOnMacOSIsRefused(t *te
 		return finalOf(f)
 	}
 	for _, p := range []string{a, b} {
-		got, err := final(p, look)
+		got, err := final(p, look, os.Lstat)
 		if finalRefusesASecondName {
 			if !errors.Is(err, errors.ErrUnsupported) || got != "" {
 				t.Errorf("Final on macOS of %s, a file with a second name, while %s is looked at = %q, %v, and want errors.ErrUnsupported", p, b, got, err)
@@ -241,5 +241,109 @@ func TestFinalOfAFileWithASecondNameAnswersTheNameOpenedOrOnMacOSIsRefused(t *te
 	}
 	if got := finalOK(t, filepath.Dir(b)); got != filepath.Dir(b) {
 		t.Errorf("Final of the folder %s = %q, and want its own name", filepath.Dir(b), got)
+	}
+}
+
+// What it costs when this fails: the race test's window, held open: a second name b of the file
+// is looked at, so macOS's F_GETPATH answers it; unlinked before the open file is counted, so that
+// count is 1; and linked again before b is looked at, so os.SameFile passes it. Final answers b,
+// a name in another folder than the one opened, and a journal keys one file by two names.
+func TestFinalOfAFileWhoseSecondNameIsUnlinkedAndLinkedBetweenItsReadsAnswersNoOtherName(t *testing.T) {
+	t.Parallel()
+	tmp := finalTemp(t)
+	a, b := filepath.Join(tmp, "a"), filepath.Join(tmp, "sub", "b")
+	if err := os.WriteFile(a, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Dir(b), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var answered string
+	read := func(f *os.File) (string, error) {
+		if err := os.Link(a, b); err != nil {
+			return "", err
+		}
+		if _, err := os.Lstat(b); err != nil {
+			return "", err
+		}
+		name, err := finalOf(f)
+		answered = name
+		if err := os.Remove(b); err != nil {
+			return "", err
+		}
+		return name, err
+	}
+	lstat := func(name string) (fs.FileInfo, error) {
+		if err := os.Link(a, b); err != nil {
+			return nil, err
+		}
+		return os.Lstat(name)
+	}
+	got, err := final(a, read, lstat)
+	if !finalRefusesASecondName {
+		if err != nil || got != a {
+			t.Errorf("Final(%s), its second name unlinked and linked again between its reads = %q, %v, and want the name opened", a, got, err)
+		}
+		return
+	}
+	if answered != b {
+		t.Fatalf("F_GETPATH answered %q, and the test wants %s, the name looked at last, so the window is open", answered, b)
+	}
+	if !errors.Is(err, errors.ErrUnsupported) || got != "" {
+		t.Errorf("Final on macOS of %s, its second name %s unlinked and linked again between its reads = %q, %v, and want errors.ErrUnsupported", a, b, got, err)
+	}
+}
+
+// finalRaceCalls is how many times the race test calls Final.
+const finalRaceCalls = 200_000
+
+// What it costs when this fails: on macOS, another process links a second name of a file in another
+// folder, looks at it and unlinks it, over and over, and one of Final's answers is that second
+// name, read when F_GETPATH answered it and passed by a count read while it was unlinked: a
+// journal keys one file by two names.
+func TestFinalUnderALinkLookUnlinkRaceAnswersNoOtherName(t *testing.T) {
+	t.Parallel()
+	tmp := finalTemp(t)
+	a, b := filepath.Join(tmp, "a"), filepath.Join(tmp, "sub", "b")
+	if err := os.WriteFile(a, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Dir(b), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Link(a, b)
+			_, _ = os.Lstat(b)
+			_ = os.Remove(b)
+		}
+	}()
+	refused, wrong := 0, map[string]int{}
+	for range finalRaceCalls {
+		got, err := Final(a)
+		switch {
+		case err == nil && got != a:
+			wrong[got]++
+		case err != nil && finalRefusesASecondName && (errors.Is(err, errors.ErrUnsupported) || errors.Is(err, ErrChanged)):
+			refused++
+		case err != nil:
+			t.Errorf("Final(%s) under the race: %v, and want its own name", a, err)
+		}
+	}
+	close(stop)
+	<-stopped
+	t.Logf("%d calls under the race: %d refused, %d wrong names", finalRaceCalls, refused, len(wrong))
+	for name, n := range wrong {
+		t.Errorf("Final(%s) under the race answered %s %d times, and want no name but its own", a, name, n)
+	}
+	if finalRefusesASecondName && refused == 0 {
+		t.Errorf("Final(%s) under the race was refused no time on macOS, so the race the test wants did not run", a)
 	}
 }

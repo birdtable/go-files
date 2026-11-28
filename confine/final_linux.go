@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/birdtable/go-files/internal/procfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -23,37 +24,32 @@ func openFinal(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path), nil
 }
 
-// finalOf reads the kernel's name for f from /proc/self/fd.
+// finalOf reads the kernel's name for f from /proc/self/fd, by procName.
 func finalOf(f *os.File) (string, error) {
-	return procName("/proc/self/fd", f)
+	return procName("/proc", f)
 }
 
 // finalHeld refuses nothing on Linux: a file with a second name answers the name it was opened by.
 func finalHeld(fs.FileInfo) error { return nil }
 
-// errNotProcFds is a /proc/self/fd that fstatfs does not show is a procfs: an owner of this mount
-// namespace may mount over that path, and a link there then answers what that owner wrote.
-var errNotProcFds = errors.New("is not shown by fstatfs to be a procfs, so its links are not the kernel's")
-
-// procName reads the link <n> for f's descriptor n in the folder fds, as trust holds /proc: fds is
-// opened, held to a procfs by fstatfs's magic, and the link read under that handle with
-// readlinkat. A test passes another fds.
-func procName(fds string, f *os.File) (string, error) {
-	dir, err := unix.Open(fds, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	for errors.Is(err, unix.EINTR) {
-		dir, err = unix.Open(fds, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	}
+// procName reads the link self/fd/<n> under proc for f's descriptor n, as trust reads
+// self/mountinfo: proc is opened and held to a procfs's root by fstatfs's magic and its inode,
+// self/fd is opened beneath it by openat2, crossing no mount and following no magic link, and the
+// link is read under that handle with readlinkat. A mount over /proc, over /proc/<pid> or over its
+// fd folder, as an owner of this mount namespace may make, is refused, and so is a kernel with no
+// openat2. A test passes another proc.
+func procName(proc string, f *os.File) (string, error) {
+	root, err := procfs.Root(proc)
 	if err != nil {
-		return "", &fs.PathError{Op: "open", Path: fds, Err: err}
+		return "", err
+	}
+	defer unix.Close(root) //nolint:errcheck // an O_PATH descriptor, only read under
+	fds := proc + "/self/fd"
+	dir, err := procfs.Beneath(root, "self/fd", unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC)
+	if err != nil {
+		return "", &fs.PathError{Op: "openat2", Path: fds, Err: err}
 	}
 	defer unix.Close(dir) //nolint:errcheck // an O_PATH descriptor, only read under
-	var sf unix.Statfs_t
-	if err := unix.Fstatfs(dir, &sf); err != nil {
-		return "", &fs.PathError{Op: "fstatfs", Path: fds, Err: err}
-	}
-	if uint32(sf.Type) != unix.PROC_SUPER_MAGIC { //nolint:gosec // G115: a magic number is the low 32 bits of f_type
-		return "", &fs.PathError{Op: "fstatfs", Path: fds, Err: errNotProcFds}
-	}
 	n := strconv.FormatUint(uint64(f.Fd()), 10)
 	for size := 256; ; size *= 2 {
 		buf := make([]byte, size)

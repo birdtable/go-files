@@ -17,7 +17,7 @@
 // link followed at any component, renames that never replace or that swap, folders made by handle
 // and a link to a folder. The program configures the root, each name, and each call's flags and
 // mode.
-// It imports the standard library, golang.org/x/sys, golang.org/x/text/unicode/norm and internal/fileid, and on Windows internal/winapi.
+// It imports the standard library, golang.org/x/sys, golang.org/x/text/unicode/norm and internal/fileid, on Linux internal/procfs, and on Windows internal/winapi.
 package confine
 
 import (
