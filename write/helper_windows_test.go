@@ -11,6 +11,8 @@ import (
 	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/birdtable/go-files/internal/loghold"
 )
 
 // linkFolder makes at, beneath root, a junction to the folder target, as confine.LinkFolder makes
@@ -61,11 +63,11 @@ func holdShared(t *testing.T, path string) func() {
 		t.Fatal(err)
 	}
 	letGo := func() {
-		_ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, far()) //nolint:forbidigo // register (path-lock): the reader lets go of its shared hold on Append's byte
+		_ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, loghold.Far()) //nolint:forbidigo // register (path-lock): the reader lets go of its shared hold on Append's byte
 		_ = f.Close()
 	}
 	t.Cleanup(letGo)
-	if err := windows.LockFileEx(windows.Handle(f.Fd()), 0, 0, 1, 0, far()); err != nil { //nolint:forbidigo // register (path-lock): a reader's shared hold on Append's byte, which the test needs Append to refuse
+	if err := windows.LockFileEx(windows.Handle(f.Fd()), 0, 0, 1, 0, loghold.Far()); err != nil { //nolint:forbidigo // register (path-lock): a reader's shared hold on Append's byte, which the test needs Append to refuse
 		t.Fatal(err)
 	}
 	return letGo
@@ -146,4 +148,9 @@ func linkOver(from, to string, posix bool) error {
 		binary.LittleEndian.PutUint16(b[length+4+2*i:], c)
 	}
 	return windows.NtSetInformationFile(h, new(windows.IO_STATUS_BLOCK), &b[0], uint32(len(b)), class)
+}
+
+// openLog is loghold.Open with Append's create and steps, holding nothing.
+func openLog(root *os.Root, name string, o options) (*os.File, error) {
+	return loghold.Open(root, name, logHow(root, name, o))
 }

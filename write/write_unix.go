@@ -100,26 +100,7 @@ func noLinks(err error) error { return err } // every Unix file system this runs
 // syncFolder is SyncFolder: a write's folder is flushed as any other is.
 func syncFolder(root *os.Root, dir string) error { return SyncFolder(root, dir) }
 
-func tryHold(f *os.File) (bool, error) {
-	err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-func names(_ *os.File, fi fs.FileInfo) (uint64, error) {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, fmt.Errorf("%s: this system does not say how many names a file has, and no line is written to it", fi.Name())
-	}
-	return uint64(st.Nlink), nil //nolint:unconvert // Nlink is uint16 on macOS and uint64 on Linux
-}
-
 func aside(root *os.Root, from, to string) error { return root.Rename(from, to) }
-
-// letGo drops f's flock before the close, so a fork on its way to exec that shares f does not keep it.
-func letGo(f *os.File) error { return syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }
 
 // pin is nothing on Unix: the count of names is read from the look the hold's check matched.
 func pin(*os.Root, string, fs.FileInfo) (func() error, error) {
@@ -128,6 +109,9 @@ func pin(*os.Root, string, fs.FileInfo) (func() error, error) {
 
 // sysOptions are options one system alone reads: none here.
 type sysOptions struct{}
+
+// forceNoIndex is fileid's test seam, which no volume here reads: every file has an inode.
+func (sysOptions) forceNoIndex() bool { return false }
 
 // newFile makes name beneath root by an exclusive create, 0600 before its mode is set, open as
 // flag says: Shared's 0644 too is set on the descriptor after (fill). Every volume here keeps a

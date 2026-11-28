@@ -13,7 +13,6 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/birdtable/go-files/confine"
 	"github.com/birdtable/go-files/internal/fileid"
 	"github.com/birdtable/go-files/internal/winapi"
 )
@@ -397,22 +396,6 @@ func noLinks(err error) error {
 // Keep's copy are kept by NTFS's log alone. SyncFolder, the caller's, flushes (flushOpen).
 func syncFolder(*os.Root, string) error { return nil }
 
-// far is the byte Append locks: past the end of any log, so a reader is never refused a range.
-func far() *windows.Overlapped { return &windows.Overlapped{Offset: 0, OffsetHigh: 0x7fffffff} }
-
-func tryHold(f *os.File) (bool, error) {
-	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, far())
-	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-// names counts by confine.NamesFile, from the handle, the one count.
-func names(f *os.File, _ fs.FileInfo) (int, error) {
-	return confine.NamesFile(f)
-}
-
 // indexed reports whether the file f is a handle to has a 64-bit file index that tells it apart from
 // another, which os.SameFile needs. It reads the index and judges it through internal/fileid, the one
 // helper write shares with the other packages that compare by file ID; o.noIndex is
@@ -421,6 +404,9 @@ func names(f *os.File, _ fs.FileInfo) (int, error) {
 func indexed(f *os.File, o options) (bool, error) {
 	return fileid.Indexed(f, o.noIndex)
 }
+
+// forceNoIndex is fileid's test seam as o carries it, for Append's hold (loghold.How).
+func (s sysOptions) forceNoIndex() bool { return s.noIndex }
 
 // toldAt opens name beneath root for its file index alone, with FILE_READ_ATTRIBUTES (the index
 // needs no more) and following no link (OpenAt opens the reparse point itself, not its target on
@@ -454,8 +440,6 @@ func toldAt(root *os.Root, name string, fi fs.FileInfo, o options) error {
 func aside(root *os.Root, from, to string) error {
 	return winapi.Retried(func() error { return root.Rename(from, to) })
 }
-
-func letGo(f *os.File) error { return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, far()) }
 
 // pin opens the held log by its name beneath root, following no link at it, to read and sharing no
 // delete: NTFS refuses the remove or rename of that name, and only that one, until it is let go.
