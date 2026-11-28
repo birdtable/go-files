@@ -39,7 +39,7 @@ func rootOnPipes(root *os.Root, name string) (err error) {
 		return &fs.PathError{Op: opOpen, Path: filepath.ToSlash(name), Err: fmt.Errorf("the root is of file type %d, not on a disk, and its own path cannot be read (%w), so it names a device or a pipe, and nothing beneath it was opened: %w", ft, errors.Join(err, ferr), fs.ErrInvalid)}
 	}
 	final := windows.UTF16ToString(buf[:min(int(n), len(buf))])
-	if !strings.EqualFold(final, pipesDevice) && !strings.HasPrefix(strings.ToLower(final), strings.ToLower(pipesDevice+`\`)) && !strings.HasPrefix(strings.ToLower(final), `\device\mup\`) { // break, restored by the next commit
+	if !strings.EqualFold(final, pipesDevice) && !strings.HasPrefix(strings.ToLower(final), strings.ToLower(pipesDevice+`\`)) {
 		return nil
 	}
 	return &fs.PathError{Op: opOpen, Path: filepath.ToSlash(name), Err: fmt.Errorf("the root is %s, on the pipes' device, where a name names a device or a pipe, and nothing beneath it was opened: %w", final, fs.ErrInvalid)}
