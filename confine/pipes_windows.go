@@ -33,7 +33,7 @@ func rootOnPipes(root *os.Root, name string) (err error) {
 	n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), volumeNameNT)
 	if err != nil {
 		ft, ferr := windows.GetFileType(h)
-		if ferr == nil && ft == windows.FILE_TYPE_DISK {
+		if ferr == nil {
 			return nil
 		}
 		return &fs.PathError{Op: opOpen, Path: filepath.ToSlash(name), Err: fmt.Errorf("the root is of file type %d, not on a disk, and its own path cannot be read (%w), so it names a device or a pipe, and nothing beneath it was opened: %w", ft, errors.Join(err, ferr), fs.ErrInvalid)}

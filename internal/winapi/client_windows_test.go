@@ -264,7 +264,7 @@ func TestAJunctionToAPipeLetsItsServerActAsNoOpenPath(t *testing.T) {
 	}{
 		{`\Device\NamedPipe\<name>`, false, func(n string) string { return `\Device\NamedPipe\` + n }, func(j, _ string) string { return j }},
 		{`\??\pipe\<name>`, false, func(n string) string { return `\??\pipe\` + n }, func(j, _ string) string { return j }},
-		{`\Device\NamedPipe\, the name below it`, true, func(string) string { return `\Device\NamedPipe\` }, func(j, n string) string { return filepath.Join(j, n) }},
+		{`\Device\NamedPipe\, the name below it`, true, func(string) string { return `\Device\NamedPipe\` }, func(j, n string) string { return filepath.Join(j, n+"-none") }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
