@@ -69,14 +69,22 @@ func testDir(t *testing.T) string {
 // does without Developer Mode.
 func link(t *testing.T, at, target string) {
 	t.Helper()
-	if err := os.Mkdir(at, 0o700); err != nil {
-		t.Fatal(err)
+	if err := plantLink(at, `\??\`+target, target); err != nil {
+		t.Fatalf("make %s a junction to %s: %v", at, target, err)
 	}
-	substitute, shown := utf16.Encode([]rune(`\??\`+target)), utf16.Encode([]rune(target))
-	names := make([]uint16, 0, len(substitute)+len(shown)+2)
-	names = append(append(append(append(names, substitute...), 0), shown...), 0)
+}
+
+// plantLink makes at, a new folder, a junction whose substitute name is sub and whose print name
+// is shown, as written, and answers the system's error.
+func plantLink(at, sub, shown string) error {
+	if err := os.Mkdir(at, 0o700); err != nil {
+		return err
+	}
+	substitute, show := utf16.Encode([]rune(sub)), utf16.Encode([]rune(shown))
+	names := make([]uint16, 0, len(substitute)+len(show)+2)
+	names = append(append(append(append(names, substitute...), 0), show...), 0)
 	b := binary.LittleEndian.AppendUint32(nil, windows.IO_REPARSE_TAG_MOUNT_POINT)
-	for _, v := range []int{8 + 2*len(names), 0, 0, 2 * len(substitute), 2 * (len(substitute) + 1), 2 * len(shown)} {
+	for _, v := range []int{8 + 2*len(names), 0, 0, 2 * len(substitute), 2 * (len(substitute) + 1), 2 * len(show)} {
 		b = binary.LittleEndian.AppendUint16(b, uint16(v))
 	}
 	for _, c := range names {
@@ -84,19 +92,17 @@ func link(t *testing.T, at, target string) {
 	}
 	p, err := windows.UTF16PtrFromString(at)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	h, err := windows.CreateFile(p, windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	var n uint32
 	err = windows.DeviceIoControl(h, windows.FSCTL_SET_REPARSE_POINT, &b[0], uint32(len(b)), nil, 0, &n, nil)
 	if cerr := windows.CloseHandle(h); cerr != nil && err == nil {
 		err = cerr
 	}
-	if err != nil {
-		t.Fatalf("make %s a junction to %s: %v", at, target, err)
-	}
+	return err
 }

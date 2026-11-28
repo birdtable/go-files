@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/birdtable/go-files/internal/fileid"
 )
 
 const opLink = "link"
@@ -48,6 +50,9 @@ func LinkFile(root *os.Root, target, at string) error {
 
 // linkChecked makes at a link to target, a folder or a file, past LinkFolder's checks.
 func linkChecked(root *os.Root, target, at string, folder bool) error {
+	if err := rootOnPipes(root, at); err != nil {
+		return err
+	}
 	return linkAs(root, target, target, at, folder)
 }
 
@@ -75,10 +80,13 @@ func linkTarget(target string, folder bool) error {
 	if !filepath.IsAbs(target) || filepath.Clean(target) != target {
 		return fmt.Errorf("the target is not a clean absolute path: %w", fs.ErrInvalid)
 	}
+	if fileid.DevicePath(target) {
+		return fmt.Errorf("the target names a device or a pipe, not a path on a drive or a volume: %w", fs.ErrInvalid)
+	}
 	if err := fits(target); err != nil {
 		return err
 	}
-	st, err := os.Stat(target)
+	st, err := sysStat(target)
 	if err != nil {
 		return err
 	}

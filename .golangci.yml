@@ -442,7 +442,8 @@ linters:
         # read (GetProcAddress, GetProcAddressByOrdinal). A proc reached by name,
         # as NewLazySystemDLL("kernel32.dll").NewProc("LockFileEx").Call(...),
         # would get past the path-lock row, which names x/sys's wrapper. go-files
-        # excepts no proc, so no exclusion scopes these. An address alone has no
+        # excepts one proc, on one line of one test, by the exclusion of the
+        # level tests' line in the overrides below. An address alone has no
         # caller while the raw-call row above holds; it is refused as well, so
         # these rows read as go-socket's.
         - pattern: ^(syscall|windows)\.(NewLazyDLL|NewLazySystemDLL|LoadDLL|MustLoadDLL|LoadLibrary|LoadLibraryEx|GetProcAddress|GetProcAddressByOrdinal)$
@@ -455,6 +456,33 @@ linters:
         # types themselves are refused at each mention.
         - pattern: ^(syscall|windows)\.(Lazy)?(DLL|Proc)$
           msg: "register: no DLL's proc is acquired in any file (NewLazyDLL, NewLazySystemDLL, LoadDLL, MustLoadDLL, LoadLibrary, NewProc, FindProc, GetProcAddress and kin); security: a proc reached by name gets past the path-lock row"
+        # The register (pipe-client): an open by name that lands on a named pipe
+        # lets the pipe's server act as the caller unless the open asks for
+        # identification alone. Every CreateFile and NtCreateFile of go-files'
+        # own code goes by internal/winapi, which passes winapi.Identify or an
+        # identification quality of service; windows.Open and syscall.Open pass
+        # neither. trust and trusttest, which may not import winapi, make their
+        # one call each with the same pair, and an exclusion below names each
+        # line. Tests open by hand, as a control or to plant a junction.
+        - pattern: ^(syscall|windows)\.(CreateFile|Open)$
+          msg: "register (pipe-client): open by internal/winapi's CreateFile, OpenPath or OpenAt; security: a raw open that lands on a named pipe lets its server act as the caller"
+        - pattern: ^windows\.NtCreateFile$
+          msg: "register (pipe-client): open by internal/winapi's CreateFile, OpenPath or OpenAt; security: a raw open that lands on a named pipe lets its server act as the caller"
+        # The register (pipe-by-path): os's calls by name (each that takes a
+        # path opens it on Windows), filepath's walks and nowait.Open pass no
+        # quality of service, so one that lands on a named pipe, by a link or
+        # a junction on the way, lets the pipe's server act as the caller.
+        # confine, appdirs and trust look at a name by internal/winapi (trust
+        # by its own createFile) wherever no judgement has refused a folder
+        # another account may change. A file built off Windows alone, and the
+        # tests, are excluded below; a look made after trust's judgement
+        # carries a nolint that says so.
+        - pattern: ^os\.(Stat|Lstat|Readlink|Open|OpenFile|OpenRoot|OpenInRoot|Create|CreateTemp|WriteFile|ReadFile|ReadDir|Mkdir|MkdirAll|MkdirTemp|Remove|RemoveAll|Rename|Truncate|Chmod|Chown|Lchown|Chtimes|Link|Symlink|Chdir|DirFS|CopyFS)$
+          msg: "register (pipe-by-path): look by internal/winapi's Stat, Lstat, Readlink or OpenPath; security: os's open by name lets a pipe's server reached on the way act as the caller"
+        - pattern: ^filepath\.(EvalSymlinks|Walk|WalkDir|Glob)$
+          msg: "register (pipe-by-path): look by internal/winapi's Stat, Lstat, Readlink or OpenPath; security: os's open by name lets a pipe's server reached on the way act as the caller"
+        - pattern: ^nowait\.Open$
+          msg: "register (pipe-by-path): look by internal/winapi's Stat, Lstat, Readlink or OpenPath; security: os's open by name lets a pipe's server reached on the way act as the caller"
         # slot forbid-extra end
         # per-project (cli.errors.2, cli.look.4, cli.look.5, cli.output.5): the
         # shared UI module's literals and constructors, for example
@@ -654,6 +682,36 @@ linters:
       - path: ^(internal/loghold/loghold_(unix|windows)|lock/(flock|lock_windows))\.go$
         linters: [forbidigo]
         text: "register \\(path-lock\\):"
+      # The pipe-client row holds outside internal/winapi and the tests, at the
+      # module's root alone. trust and trusttest may not import winapi, so each
+      # makes its CreateFile in one function, flags|identify, and trusttest its
+      # NtCreateFile with identifyOnly(); by file and by the call's own line,
+      # a raw open on any other line is red.
+      - path: ^internal/winapi/[^/]+\.go$|_test\.go$
+        linters: [forbidigo]
+        text: "register \\(pipe-client\\):"
+      - path: ^trust/(trust_windows|trusttest/trusttest_windows)\.go$
+        linters: [forbidigo]
+        text: "register \\(pipe-client\\):"
+        source: '^\treturn windows\.CreateFile\(name, access, share, nil, disposition, flags\|identify, template\)$'
+      - path: ^trust/trusttest/trusttest_windows\.go$
+        linters: [forbidigo]
+        text: "register \\(pipe-client\\):"
+        source: '^\tif err := windows\.NtCreateFile\(&h, windows\.READ_CONTROL\|windows\.WRITE_DAC, &attrs, '
+      # The pipe-by-path row holds in confine, appdirs and trust (not
+      # trusttest), in a file Windows builds, outside the tests. A file whose
+      # name Go reads as a system that is not Windows (_linux, _darwin,
+      # _freebsd, _netbsd) is excluded by pattern. A _unix, _passwd or _other
+      # file is excluded only by its exact name below, as Go reads no system
+      # in those suffixes: each one's build line leaves Windows out, and any
+      # other such file, which Windows may build, is held to the row. The lint
+      # task's plants show a Windows-built _unix, _passwd and _other file red.
+      - path-except: ^(confine|appdirs|trust)/[^/]+\.go$
+        linters: [forbidigo]
+        text: "register \\(pipe-by-path\\):"
+      - path: _test\.go$|_(linux|darwin|freebsd|netbsd)\.go$|^(appdirs/(account|free|here|temp)_unix|appdirs/account_passwd|confine/(open|rename|runnable|shared)_unix|trust/(device|trust)_unix)\.go$|^(appdirs/(free|index|sysstat|volume)|confine/(folds|index|link|rename|resolve|sysstat)|trust/(aclmask|interpreters|maclist|mount|proc))_other\.go$
+        linters: [forbidigo]
+        text: "register \\(pipe-by-path\\):"
       # The no-raw-call row holds outside the one darwin
       # file that reads a name's access list by getattrlist(2), which x/sys
       # does not wrap (golang/go#83151). The file makes one call,
@@ -668,6 +726,17 @@ linters:
         linters: [forbidigo]
         text: "register: no raw system call"
         source: '^\t_, _, e := unix\.Syscall6\(unix\.SYS_GETATTRLIST, '
+      # The DLL-proc row holds outside one line of one test: internal/winapi's
+      # level tests take on a pipe client's token by ImpersonateNamedPipeClient,
+      # which x/sys does not wrap and DeviceIoControl cannot stand in for, to
+      # read the level go-files' opens give a pipe's server. By file, a test
+      # Windows alone builds, and by the line that acquires that proc alone: a
+      # second proc, a DLL loaded on any other line, or the same line in another
+      # file is red. When x/sys wraps it, the line and this exclusion go.
+      - path: ^internal/winapi/client_windows_test\.go$
+        linters: [forbidigo]
+        text: "register: no DLL's proc is acquired"
+        source: '^\timpersonate := windows\.NewLazySystemDLL\("advapi32\.dll"\)\.NewProc\("ImpersonateNamedPipeClient"\)$'
       # Here reads the environment
       # of the account that runs it, which For takes as an argument, so a
       # program needs no OS knowledge to find its folders. By file, at the

@@ -302,6 +302,37 @@ tasks:
           if [ -f "$work/bad" ]; then cat "$work/report" >&2; exit 1; fi
           exit 0
         timeout: 10m
+      # The pipe-by-path row is held by plants too. A scratch module has files of confine, appdirs
+      # and trust that Windows builds, with no suffix or with one Go reads no system in (_unix,
+      # _passwd, _other), each calling os.ReadFile, and forbidigo's report for windows must name
+      # each with the row. An exclusion by such a suffix, or the row dropped, leaves a plant
+      # unreported, and this is red.
+      - cmd: |
+          bin=$(go tool -modfile=tools/golangci-lint.mod -n golangci-lint) || exit 1
+          work=$(TMPDIR="${TMPDIR:-${TEMP:-/tmp}}" mktemp -d) || exit 1
+          trap 'rm -rf "$work"' EXIT
+          cp go.mod go.sum .golangci.yml "$work/"
+          # <file> <package clause> <the plant's function>
+          plants="
+          confine/p.go confine Plain
+          confine/p_unix.go confine Unix
+          appdirs/p_passwd.go appdirs Passwd
+          trust/p_unix.go trust Unix
+          trust/p_other.go trust Other
+          "
+          echo "$plants" | while read -r f pkg fn; do
+            [ -n "$f" ] || continue
+            mkdir -p "$work/$(dirname "$f")" && printf 'package %s\n\nimport "os"\n\n// %s reads a file by name.\nfunc %s() ([]byte, error) { return os.ReadFile("p") }\n' "$pkg" "$fn" "$fn" >"$work/$f" || exit 1
+          done || exit 1
+          (cd "$work" && GOOS=windows "$bin" run --allow-parallel-runners --default none --enable forbidigo --max-issues-per-linter 0 --max-same-issues 0 ./... >"$work/raw" 2>&1) || true
+          tr '\\' / <"$work/raw" >"$work/report" || exit 1
+          echo "$plants" | while read -r f pkg fn; do
+            [ -n "$f" ] || continue
+            if ! grep -q "^$f:.*register (pipe-by-path):" "$work/report"; then echo "lint: the plant $f (os.ReadFile) is not refused by the pipe-by-path row" >&2; echo bad >>"$work/bad"; fi
+          done
+          if [ -f "$work/bad" ]; then cat "$work/report" >&2; exit 1; fi
+          exit 0
+        timeout: 10m
       - mkdir -p .task/pass && touch .task/pass/lint-{{.GOVERSION}}
 
   test:
@@ -382,7 +413,20 @@ tasks:
       - rm -f .task/pass/tidy-{{.GOVERSION}}
       - cmd: |
           go mod tidy -diff || exit 1
-          for mod in tools/*.mod; do go mod tidy -modfile="$mod" -diff || exit 1; done
+          for mod in tools/*.mod; do
+            [ "$mod" = tools/hatch.mod ] && continue
+            go mod tidy -modfile="$mod" -diff || exit 1
+          done
+        timeout: 2m
+      # tools/hatch.mod names a module of its own, which requires the published go-files. Tidied over
+      # the tree, it must resolve each package the tree imports from that release, so a package the
+      # tree adds is red until a release holds it. It is tidied alone, as the go.mod of an empty
+      # folder, and holds hatch's own closure.
+      - cmd: |
+          work=$(TMPDIR="${TMPDIR:-${TEMP:-/tmp}}" mktemp -d) || exit 1
+          trap 'rm -rf "$work"' EXIT
+          cp tools/hatch.mod "$work/go.mod" && cp tools/hatch.sum "$work/go.sum" || exit 1
+          go -C "$work" mod tidy -diff || { echo "tidy: tools/hatch.mod, tidied alone, is not tidy" >&2; exit 1; }
         timeout: 2m
       # go.mod requires testkit for the tests, and nothing it requires, however far
       # down, is go-proc, out of which testkit was moved. depguard's code rows refuse testkit to

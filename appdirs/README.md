@@ -310,6 +310,7 @@ own device: a file system another account mounts on the folder reports any owner
 | a folder of `who`'s `Mounts` that names nothing refused with `trust.ErrMountEntry`, never `fs.ErrNotExist`, so not taken for the temp folder not yet made | `TestOnUnixAWhoMountsEntryThatNamesNothingRefusesTheTempBase` |
 | the `Apart` of each `who` given, joined | `TestTempJoinsTheApartFoldersOfEachWhoItIsGiven` |
 | `TempOverflow` refuses with `trust.ErrOverflow` off Linux (matching `errors.ErrUnsupported` too) and on Linux where the uid_map maps root, and makes nothing | `TestTempOverflowRefusesOffLinuxAndWhereTheUIDMapMapsRoot` |
+| on Windows, a device or pipe path (`\\.\`, or `\\?\` or `\??\` naming neither a drive nor a `Volume{GUID}`) as a folder of `apart`, refused matching `fs.ErrInvalid` before anything is opened or made | `TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen` |
 | in a namespace that maps this account and not root, `TempOverflow` is a private folder `0700`, answered again, and `Temp` refuses the overflow account by name | `TestInAUserNamespaceTempOverflowIsAPrivateFolderAndTempRefusesTheOverflowAccount` (Linux, in `unshare --user --map-current-user`) |
 
 Another account's folder on the way cannot be made by a test that is not root, which every rule
@@ -330,6 +331,14 @@ namespace where `/` reads as another account's: a runner that cannot prove those
 | the others | none | an `*fs.PathError` matching `errors.ErrUnsupported`. |
 
 A path that is not there is an `*fs.PathError` matching `fs.ErrNotExist`.
+
+On Windows, `Free` and `Volume` refuse a path that names a device or a pipe (`\\.\`, or `\\?\` or
+`\??\` naming neither a drive nor a `Volume{GUID}`), matching `fs.ErrInvalid`, before anything is
+opened, and each asks the system from a handle of its own, opened with identification alone, so a
+pipe a junction leads to learns who the caller is and may act as it in nothing; what that handle
+names must be a file or a folder on a volume, so a junction to a pipe is refused too, and `Free`
+asks `GetDiskFreeSpaceEx` of the volume's root read from that handle. The tests are
+`TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen` and `TestAJunctionToAPipeIsNoFolderToAppdirs`.
 
 ## Volume, per system
 
