@@ -32,6 +32,9 @@ func Readlink(root *os.Root, name string) (target string, err error) {
 		return "", &fs.PathError{Op: opReadlink, Path: at, Err: fmt.Errorf("it is the root, not a link in it: %w", ErrOutside)}
 	}
 	missing := &fs.PathError{Op: opReadlink, Path: at, Err: fs.ErrNotExist}
+	if err := rootOnPipes(root, name); err != nil {
+		return "", err
+	}
 	dir, err := walkedFolder(root, filepath.Dir(name))
 	if err != nil {
 		return "", err

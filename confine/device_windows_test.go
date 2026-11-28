@@ -231,22 +231,23 @@ func TestAFolderTheWalkPassedTurnedToAPipeIsNoFileToResolve(t *testing.T) {
 
 // A root opened on the pipes' folder, by os.OpenRoot through a junction to \Device\NamedPipe\ or of
 // \\.\pipe\ itself, holds each pipe as a name beneath it, and Go's open within a root passes no
-// quality of service. Open, ReadCapped, IsRunnable and Names refuse such a root, matching
-// fs.ErrInvalid, read from the root's own handle before any open beneath it, and the pipe whose name
-// each was given sees no client. The control opens a second pipe's name by the root's own OpenFile
-// and is seen, so the route is live; where the system opens no root on \\.\pipe\ itself, or no name
-// within it, that is logged as its own answer. A root on a disk is unchanged, as every other test of
-// these calls shows.
+// quality of service. Each confine call that opens a name beneath a caller's root, rootCalls' list,
+// refuses such a root, matching fs.ErrInvalid, read from the root's own handle before any open
+// beneath it, and the pipe whose name each was given sees no client. The control opens a second
+// pipe's name by the root's own OpenFile and is seen, so the route is live; where the system opens
+// no root on \\.\pipe\ itself, or no name within it, that is logged as its own answer. A root on a
+// disk is unchanged, as every other test of these calls shows.
 //
 // What it costs when this fails: a junction planted where the program opens a root leads confine's
-// open of a name beneath it to a less-trusted account's pipe, whose server may then act as the
-// program.
+// open, removal, folder or link of a name beneath it to a less-trusted account's pipe, whose server
+// may then act as the program.
 func TestARootOnThePipesFolderIsRefusedBeforeAnyOpenBeneathIt(t *testing.T) {
 	t.Parallel()
 	j := filepath.Join(t.TempDir(), "pipes")
 	if err := plantRawJunction(j, `\Device\NamedPipe\`, `\Device\NamedPipe\`); err != nil {
 		t.Fatalf("plant the junction %s to the pipes' folder: %v", j, err)
 	}
+	disk := diskRoot(t)
 	for _, c := range []struct {
 		name, path string
 		must       bool
@@ -276,32 +277,106 @@ func TestARootOnThePipesFolderIsRefusedBeforeAnyOpenBeneathIt(t *testing.T) {
 			t.Logf("native: the root's own open of a pipe's name in the root %s: %v", c.name, err)
 			continue
 		}
-		for _, s := range []struct {
-			name string
-			call func(name string) error
-		}{
-			{"Open", func(n string) error {
-				f, err := Open(root, n, os.O_RDWR, 0)
-				if f != nil {
-					err = errors.Join(err, f.Close())
-				}
-				return err
-			}},
-			{"ReadCapped", func(n string) error { _, err := ReadCapped(root, n, 1); return err }},
-			{"IsRunnable", func(n string) error { _, err := IsRunnable(root, n); return err }},
-			{"Names", func(n string) error { _, err := Names(root, n); return err }},
-		} {
-			name, reached := listeningPipe(t)
-			err := s.call(name)
-			switch {
-			case err == nil:
-				t.Errorf("%s of the pipe %s in the root %s: no error, and want the root refused", s.name, name, c.name)
-			case !errors.Is(err, fs.ErrInvalid):
-				t.Errorf("%s of the pipe %s in the root %s: %v, and want the root refused, matching fs.ErrInvalid", s.name, name, c.name, err)
+		refusesEveryCall(t, root, c.name, disk)
+	}
+}
+
+// rootCall is one confine call that opens a name beneath a caller's root, given that root and the
+// name.
+type rootCall struct {
+	name string
+	call func(root *os.Root, name string) error
+}
+
+// rootCalls are the confine calls that open a name beneath a caller's root, each of which asks
+// rootOnPipes first, by walkOpen or at its own entry. disk is a root on a disk, the target of the
+// links and CopyTree's other root where it is copied from; linked, a root on a disk that holds only
+// a junction to itself, is CopyTree's other root where it is copied into, so the copy has a link and
+// nothing else to make there.
+func rootCalls(disk, linked *os.Root) []rootCall {
+	closed := func(r *os.Root, err error) error {
+		if r != nil {
+			err = errors.Join(err, r.Close())
+		}
+		return err
+	}
+	return []rootCall{
+		{"Open", func(r *os.Root, n string) error {
+			f, err := Open(r, n, os.O_RDWR, 0)
+			if f != nil {
+				err = errors.Join(err, f.Close())
 			}
-			if err := reached(); err != nil {
-				t.Errorf("%s of the pipe %s in the root %s: %v", s.name, name, c.name, err)
-			}
+			return err
+		}},
+		{"ReadCapped", func(r *os.Root, n string) error { _, err := ReadCapped(r, n, 1); return err }},
+		{"IsRunnable", func(r *os.Root, n string) error { _, err := IsRunnable(r, n); return err }},
+		{"Names", func(r *os.Root, n string) error { _, err := Names(r, n); return err }},
+		{"NoLinks", func(r *os.Root, n string) error { _, err := NoLinks(r, n); return err }},
+		{"Readlink", func(r *os.Root, n string) error { _, err := Readlink(r, n); return err }},
+		{"Remove", func(r *os.Root, n string) error { return Remove(r, n) }},
+		{"RemoveAll", func(r *os.Root, n string) error { return RemoveAll(r, n) }},
+		{"RemoveAllOwned", func(r *os.Root, n string) error { return RemoveAllOwned(r, n) }},
+		{"Mkdir", func(r *os.Root, n string) error { return closed(Mkdir(r, n, 0o700)) }},
+		{"MkdirPrivate", func(r *os.Root, n string) error { return closed(MkdirPrivate(r, n)) }},
+		{"MkdirShared", func(r *os.Root, n string) error { return closed(MkdirShared(r, n)) }},
+		{"MkdirFresh", func(r *os.Root, n string) error { d, _, err := MkdirFresh(r, n); return closed(d, err) }},
+		{"Collide", func(r *os.Root, n string) error { _, err := Collide(r, n, n+"-b"); return err }},
+		{"RenameNoReplace", func(r *os.Root, n string) error { return RenameNoReplace(r, n, n+"-to") }},
+		{"RenameExchange", func(r *os.Root, n string) error { return RenameExchange(r, n, n+"-to") }},
+		{"LinkFolder", func(r *os.Root, n string) error { return LinkFolder(r, disk.Name(), n) }},
+		{"LinkFile", func(r *os.Root, n string) error { return LinkFile(r, filepath.Join(disk.Name(), "file"), n) }},
+		{"CopyTree from it", func(r *os.Root, _ string) error { return CopyTree(disk, r) }},
+		{"CopyTree into it", func(r *os.Root, _ string) error { return CopyTree(r, linked) }},
+	}
+}
+
+// diskRoot is a root on a disk, a temporary folder holding the file "file", closed at the test's end.
+func diskRoot(t *testing.T) *os.Root {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	return root
+}
+
+// linkedRoot is a root on a disk, a temporary folder holding only the junction "j" to itself, closed
+// at the test's end.
+func linkedRoot(t *testing.T) *os.Root {
+	t.Helper()
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	if err := LinkFolder(root, dir, "j"); err != nil {
+		t.Fatalf("the control: LinkFolder of j to %s: %v", dir, err)
+	}
+	return root
+}
+
+// refusesEveryCall gives each of rootCalls the name of a pipe of its own, listening, beneath root,
+// and wants each refused, matching fs.ErrInvalid, with the pipe seeing no client. where says what
+// root is.
+func refusesEveryCall(t *testing.T, root *os.Root, where string, disk *os.Root) {
+	t.Helper()
+	for _, s := range rootCalls(disk, linkedRoot(t)) {
+		name, reached := listeningPipe(t)
+		err := s.call(root, name)
+		switch {
+		case err == nil:
+			t.Errorf("%s of the pipe %s in the root %s: no error, and want the root refused", s.name, name, where)
+		case !errors.Is(err, fs.ErrInvalid):
+			t.Errorf("%s of the pipe %s in the root %s: %v, and want the root refused, matching fs.ErrInvalid", s.name, name, where, err)
+		}
+		if err := reached(); err != nil {
+			t.Errorf("%s of the pipe %s in the root %s: %v", s.name, name, where, err)
 		}
 	}
 }

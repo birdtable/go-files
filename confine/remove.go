@@ -96,6 +96,9 @@ func folderOfName(root *os.Root, name string, reached func(step string)) (*os.Ro
 	if err := refusedName(opRemove, name); err != nil {
 		return nil, "", err
 	}
+	if err := rootOnPipes(root, name); err != nil {
+		return nil, "", err
+	}
 	dir := filepath.Dir(name)
 	if dir == "." {
 		in, err := root.OpenRoot(".")

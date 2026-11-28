@@ -131,6 +131,9 @@ func NoLinks(root *os.Root, name string) (fs.FileInfo, error) {
 	if err := clean(name); err != nil {
 		return nil, err
 	}
+	if err := rootOnPipes(root, name); err != nil {
+		return nil, err
+	}
 	w, err := walkTo(root, name, func(string) {})
 	if err != nil || w.dir == nil {
 		return nil, err

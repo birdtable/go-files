@@ -47,6 +47,9 @@ func collide(root *os.Root, a, b string, made func(), looked func(step string)) 
 			return false, &fs.PathError{Op: opCollide, Path: filepath.ToSlash(name), Err: fmt.Errorf("it is not one name in the folder: %w", ErrOutside)}
 		}
 	}
+	if err := rootOnPipes(root, a); err != nil {
+		return false, err
+	}
 	if a == b {
 		return true, nil
 	}
