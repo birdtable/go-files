@@ -577,5 +577,5 @@ func folderOnPipes(dir, path string) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, d.Close()) }()
-	return nil
+	return winapi.OnPipes(d, path)
 }
