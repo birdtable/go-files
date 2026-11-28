@@ -278,6 +278,8 @@ tasks:
           internal/cmd/measure/p.go measure $kit layer-internal
           internal/winapi/p.go winapi $kit layer-winapi
           internal/winapi/p_test.go winapi $mod/lib layer-winapi-tests
+          internal/procfs/p.go procfs $kit layer-procfs
+          internal/procfs/p_test.go procfs $mod/lib layer-procfs
           internal/testtoken/p.go testtoken $mod/lib layer-testtoken
           internal/secondconsumer/p_test.go secondconsumer $mod/lib layer-second-consumer
           p_test.go gofiles_test $mod/lib layer-no-row
@@ -393,7 +395,7 @@ tasks:
         timeout: 2m
 
   size:
-    desc: the non-test Go lines outside internal/ but internal/winapi, as wc -l counts them; fails above the ceiling of 14,525, or treesum's of 548
+    desc: the non-test Go lines outside internal/ but internal/winapi, as wc -l counts them; fails above the ceiling of 15,617, or treesum's of 548
     sources: ["**/*.go", Taskfile.yml]
     generates: [".task/pass/size-{{.GOVERSION}}"]
     cmds:

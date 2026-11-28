@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/birdtable/go-files/internal/procfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -139,8 +140,7 @@ func readMountinfoUpTo(limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer unix.Close(root) //nolint:errcheck // an O_PATH descriptor holds nothing to flush
-	how := unix.OpenHow{Flags: unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_XDEV | unix.RESOLVE_NO_MAGICLINKS}
-	fd, err := unix.Openat2(root, "self/mountinfo", &how)
+	fd, err := procfs.Beneath(root, "self/mountinfo", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC)
 	if err != nil {
 		return nil, &fs.PathError{Op: "openat2", Path: path, Err: notProcOpen(err)}
 	}
@@ -169,24 +169,9 @@ func readUpTo(fd int, path string, limit int64) ([]byte, error) {
 	return b, err
 }
 
-// procRootIno is the inode of a procfs's root folder, PROC_ROOT_INO.
-const procRootIno = 1
-
 // procRoot is /proc opened O_PATH and held to a procfs's root, by fstatfs and its inode, so a file
-// system mounted there, or a folder of a procfs bound there, is errNotProc.
-func procRoot() (int, error) {
-	fd, err := unix.Open("/proc", unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return -1, &fs.PathError{Op: "open", Path: "/proc", Err: err}
-	}
-	var sf unix.Statfs_t
-	var st unix.Stat_t
-	if unix.Fstatfs(fd, &sf) != nil || uint32(sf.Type) != unix.PROC_SUPER_MAGIC || unix.Fstat(fd, &st) != nil || st.Ino != procRootIno { //nolint:gosec // G115: a magic number is the low 32 bits of f_type
-		unix.Close(fd) //nolint:errcheck,gosec // G104: a descriptor not kept
-		return -1, &fs.PathError{Op: "fstatfs", Path: "/proc", Err: errNotProc}
-	}
-	return fd, nil
-}
+// system mounted there, or a folder of a procfs bound there, is errNotProc: internal/procfs's Root.
+func procRoot() (int, error) { return procfs.Root("/proc") }
 
 // devName is the device dev as mountinfo writes it, "<major>:<minor>".
 func devName(dev uint64) string {
