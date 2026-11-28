@@ -102,7 +102,7 @@ linters:
         # arch.ports.23: operating-system packages only in the host layer.
         os-host:
           # slot os-host begin
-          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/procfs/**", "!**/internal/testtoken/**", "!**/internal/loghold/*_windows.go"]
+          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/testtoken/**", "!**/internal/loghold/*_windows.go"]
           # go-files: each package is its own host layer; the layer rows below name what each may import
           # slot os-host end
           deny:
@@ -178,11 +178,11 @@ linters:
         layer-trust:
           files: ["**/trust/*.go", "!$test"]
           list-mode: strict
-          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$, github.com/birdtable/go-files/internal/procfs$]
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/fileid$]
         layer-confine:
           files: ["**/confine/*.go", "!$test", "!**/confine/*_windows.go"]
           list-mode: strict
-          allow: [$gostd, golang.org/x/sys, golang.org/x/text/unicode/norm$, github.com/birdtable/go-files/internal/fileid$, github.com/birdtable/go-files/internal/procfs$]
+          allow: [$gostd, golang.org/x/sys, golang.org/x/text/unicode/norm$, github.com/birdtable/go-files/internal/fileid$]
         layer-confine-windows:
           files: ["**/confine/*_windows.go", "!$test"]
           list-mode: strict
@@ -301,12 +301,6 @@ linters:
           files: ["**/internal/fileid/*.go", "**/internal/cmd/measure/*.go"]
           list-mode: strict
           allow: [$gostd]
-        # internal/procfs holds Linux's /proc for trust and confine, and takes golang.org/x/sys
-        # for the calls; its tests take that alone, as internal/fileid's do.
-        layer-procfs:
-          files: ["**/internal/procfs/*.go"]
-          list-mode: strict
-          allow: [$gostd, golang.org/x/sys]
         layer-winapi:
           files: ["**/internal/winapi/*.go", "!$test"]
           list-mode: strict
@@ -329,7 +323,7 @@ linters:
           list-mode: strict
           allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/lock$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/treesum$, github.com/birdtable/go-files/filestest$]
         layer-no-row:
-          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/loghold/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/procfs/*.go", "!**/internal/testtoken/*.go", "!**/internal/secondconsumer/*.go"]
+          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/loghold/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/testtoken/*.go", "!**/internal/secondconsumer/*.go"]
           list-mode: strict
           allow: [$gostd]
         # slot layer-rows end
@@ -668,16 +662,15 @@ linters:
       - path: ^confine/[^/]+_linux(_test)?\.go$
         linters: [forbidigo]
         text: "register \\(confine-to-folder\\):"
-      # internal/procfs opens a file beneath its held /proc root by one
-      # openat2 that sets RESOLVE_NO_XDEV and RESOLVE_NO_MAGICLINKS itself, so
-      # no caller can leave them out and no file mounted or linked there is
-      # read as the kernel's: trust reads self/mountinfo and confine self/fd
-      # through it. By file, at the module's root, and by the call's own
-      # source line: openat2 anywhere else, trust among them, is red.
-      - path: ^internal/procfs/procfs_linux\.go$
+      # trust reads
+      # /proc/self/mountinfo by one openat2 from its held /proc root, with
+      # RESOLVE_NO_XDEV and RESOLVE_NO_MAGICLINKS, so no file mounted or linked
+      # there is read as the kernel's. By file, at the module's root, and by
+      # the call's own source line: openat2 anywhere else in trust is red.
+      - path: ^trust/mount_linux\.go$
         linters: [forbidigo]
         text: "register \\(confine-to-folder\\):"
-        source: 'unix\.Openat2\(root, name, &how\)'
+        source: 'unix\.Openat2\(root, "self/mountinfo", &how\)'
       # The path-lock row holds
       # outside lock's and internal/loghold's two system files each. lock locks the file
       # it opened and checked. Append holds its log on its own
