@@ -228,3 +228,80 @@ func TestAFolderTheWalkPassedTurnedToAPipeIsNoFileToResolve(t *testing.T) {
 		t.Errorf("Resolve of %s: %q, rest %v, and no error, and a pipe is no file to it", path, got, rest)
 	}
 }
+
+// A root opened on the pipes' folder, by os.OpenRoot through a junction to \Device\NamedPipe\ or of
+// \\.\pipe\ itself, holds each pipe as a name beneath it, and Go's open within a root passes no
+// quality of service. Open, ReadCapped, IsRunnable and Names refuse such a root, matching
+// fs.ErrInvalid, read from the root's own handle before any open beneath it, and the pipe whose name
+// each was given sees no client. The control opens a second pipe's name by the root's own OpenFile
+// and is seen, so the route is live; where the system opens no root on \\.\pipe\ itself, or no name
+// within it, that is logged as its own answer. A root on a disk is unchanged, as every other test of
+// these calls shows.
+//
+// What it costs when this fails: a junction planted where the program opens a root leads confine's
+// open of a name beneath it to a less-trusted account's pipe, whose server may then act as the
+// program.
+func TestARootOnThePipesFolderIsRefusedBeforeAnyOpenBeneathIt(t *testing.T) {
+	t.Parallel()
+	j := filepath.Join(t.TempDir(), "pipes")
+	if err := plantRawJunction(j, `\Device\NamedPipe\`, `\Device\NamedPipe\`); err != nil {
+		t.Fatalf("plant the junction %s to the pipes' folder: %v", j, err)
+	}
+	for _, c := range []struct {
+		name, path string
+		must       bool
+	}{
+		{`through a junction to \Device\NamedPipe\`, j, true},
+		{`of \\.\pipe\ itself`, `\\.\pipe\`, false},
+	} {
+		root, err := os.OpenRoot(c.path)
+		switch {
+		case err != nil && c.must:
+			t.Fatalf("the control: os.OpenRoot of the pipes' folder %s: %v", c.name, err)
+		case err != nil:
+			t.Logf("native: os.OpenRoot of the pipes' folder %s: %v", c.name, err)
+			continue
+		}
+		t.Cleanup(func() { _ = root.Close() })
+		other, seen := listeningPipe(t)
+		f, err := root.OpenFile(other, os.O_RDWR, 0)
+		if err == nil {
+			err = f.Close()
+		}
+		saw := seen() != nil
+		switch {
+		case (err != nil || !saw) && c.must:
+			t.Fatalf("the control: the root's own open of a pipe's name in the root %s: %v, and the pipe saw a client: %t, so this test cannot see an open", c.name, err, saw)
+		case err != nil || !saw:
+			t.Logf("native: the root's own open of a pipe's name in the root %s: %v", c.name, err)
+			continue
+		}
+		for _, s := range []struct {
+			name string
+			call func(name string) error
+		}{
+			{"Open", func(n string) error {
+				f, err := Open(root, n, os.O_RDWR, 0)
+				if f != nil {
+					err = errors.Join(err, f.Close())
+				}
+				return err
+			}},
+			{"ReadCapped", func(n string) error { _, err := ReadCapped(root, n, 1); return err }},
+			{"IsRunnable", func(n string) error { _, err := IsRunnable(root, n); return err }},
+			{"Names", func(n string) error { _, err := Names(root, n); return err }},
+		} {
+			name, reached := listeningPipe(t)
+			err := s.call(name)
+			switch {
+			case err == nil:
+				t.Errorf("%s of the pipe %s in the root %s: no error, and want the root refused", s.name, name, c.name)
+			case !errors.Is(err, fs.ErrInvalid):
+				t.Errorf("%s of the pipe %s in the root %s: %v, and want the root refused, matching fs.ErrInvalid", s.name, name, c.name, err)
+			}
+			if err := reached(); err != nil {
+				t.Errorf("%s of the pipe %s in the root %s: %v", s.name, name, c.name, err)
+			}
+		}
+	}
+}

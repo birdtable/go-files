@@ -453,15 +453,20 @@ linters:
           msg: "register (pipe-client): open by internal/winapi's CreateFile, OpenPath or OpenAt; security: a raw open that lands on a named pipe lets its server act as the caller"
         - pattern: ^windows\.NtCreateFile$
           msg: "register (pipe-client): open by internal/winapi's CreateFile, OpenPath or OpenAt; security: a raw open that lands on a named pipe lets its server act as the caller"
-        # The register (pipe-by-path): os's opens by name pass no quality of
-        # service on Windows, so one that lands on a named pipe, by a link or
+        # The register (pipe-by-path): os's calls by name (each that takes a
+        # path opens it on Windows), filepath's walks and nowait.Open pass no
+        # quality of service, so one that lands on a named pipe, by a link or
         # a junction on the way, lets the pipe's server act as the caller.
         # confine, appdirs and trust look at a name by internal/winapi (trust
         # by its own createFile) wherever no judgement has refused a folder
         # another account may change. A file built off Windows alone, and the
         # tests, are excluded below; a look made after trust's judgement
         # carries a nolint that says so.
-        - pattern: ^os\.(Stat|Lstat|Readlink|Open|OpenFile|OpenRoot|OpenInRoot)$
+        - pattern: ^os\.(Stat|Lstat|Readlink|Open|OpenFile|OpenRoot|OpenInRoot|Create|CreateTemp|WriteFile|ReadFile|ReadDir|Mkdir|MkdirAll|MkdirTemp|Remove|RemoveAll|Rename|Truncate|Chmod|Chown|Lchown|Chtimes|Link|Symlink|Chdir|DirFS|CopyFS)$
+          msg: "register (pipe-by-path): look by internal/winapi's Stat, Lstat, Readlink or OpenPath; security: os's open by name lets a pipe's server reached on the way act as the caller"
+        - pattern: ^filepath\.(EvalSymlinks|Walk|WalkDir|Glob)$
+          msg: "register (pipe-by-path): look by internal/winapi's Stat, Lstat, Readlink or OpenPath; security: os's open by name lets a pipe's server reached on the way act as the caller"
+        - pattern: ^nowait\.Open$
           msg: "register (pipe-by-path): look by internal/winapi's Stat, Lstat, Readlink or OpenPath; security: os's open by name lets a pipe's server reached on the way act as the caller"
         # slot forbid-extra end
         # per-project (cli.errors.2, cli.look.4, cli.look.5, cli.output.5): the
@@ -677,11 +682,14 @@ linters:
         text: "register \\(pipe-client\\):"
         source: '^\tif err := windows\.NtCreateFile\(&h, windows\.READ_CONTROL\|windows\.WRITE_DAC, &attrs, '
       # The pipe-by-path row holds in confine, appdirs and trust (not
-      # trusttest), in a file Windows builds, outside the tests.
+      # trusttest), in a file Windows builds, outside the tests: a file
+      # named for a system that is not Windows is excluded, and an _other
+      # file only by its name below, each one's build line leaving Windows
+      # out, so an _other file Windows builds is held to it.
       - path-except: ^(confine|appdirs|trust)/[^/]+\.go$
         linters: [forbidigo]
         text: "register \\(pipe-by-path\\):"
-      - path: _test\.go$|_(other|unix|passwd)\.go$
+      - path: _test\.go$|_(unix|passwd|linux|darwin|freebsd|netbsd)\.go$|^(appdirs/(free|index|sysstat|volume)|confine/(folds|index|link|rename|resolve|sysstat)|trust/(aclmask|interpreters|maclist|mount|proc))_other\.go$
         linters: [forbidigo]
         text: "register \\(pipe-by-path\\):"
       # The no-raw-call row holds outside the one darwin

@@ -248,7 +248,9 @@ func plantJunction(link, sub string) error {
 // by winapi.CreateFile through it gives the server SecurityIdentification alone, and OpenPath, which
 // Stat, Lstat and the opens of confine and appdirs that follow a path are, reaches it for the
 // attributes alone, writing nothing, so its server takes on no token at all. Where the system
-// follows none, the control says so and nothing else is asked.
+// follows none, the control says so and nothing else is asked; the system follows the junction
+// to the pipes' own folder, its open of the name below it reaching the pipe, so there a control
+// that reaches no pipe fails the test, which cannot then see a level.
 //
 // What it costs when this fails: a junction a less-trusted account planted in a folder the program
 // walks gives that account's pipe server the program's token to act with.
@@ -256,12 +258,13 @@ func TestAJunctionToAPipeLetsItsServerActAsNoOpenPath(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name string
+		must bool
 		sub  func(pipe string) string
 		path func(junction, pipe string) string
 	}{
-		{`\Device\NamedPipe\<name>`, func(n string) string { return `\Device\NamedPipe\` + n }, func(j, _ string) string { return j }},
-		{`\??\pipe\<name>`, func(n string) string { return `\??\pipe\` + n }, func(j, _ string) string { return j }},
-		{`\Device\NamedPipe\, the name below it`, func(string) string { return `\Device\NamedPipe\` }, func(j, n string) string { return filepath.Join(j, n) }},
+		{`\Device\NamedPipe\<name>`, false, func(n string) string { return `\Device\NamedPipe\` + n }, func(j, _ string) string { return j }},
+		{`\??\pipe\<name>`, false, func(n string) string { return `\??\pipe\` + n }, func(j, _ string) string { return j }},
+		{`\Device\NamedPipe\, the name below it`, true, func(string) string { return `\Device\NamedPipe\` }, func(j, n string) string { return filepath.Join(j, n) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -294,7 +297,10 @@ func TestAJunctionToAPipeLetsItsServerActAsNoOpenPath(t *testing.T) {
 				}
 				return windows.CreateFile(p, rw, 0, nil, windows.OPEN_EXISTING, 0, 0)
 			})
-			if !ok {
+			switch {
+			case !ok && c.must:
+				t.Fatalf("the control: an open with no quality of service reached no pipe through the junction %s, where the system opens the pipe, so this test cannot see a level", c.name)
+			case !ok:
 				t.Logf("native: the system follows no junction %s to a pipe, so no open through one reaches it", c.name)
 				return
 			}
