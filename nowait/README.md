@@ -23,10 +23,10 @@ the mode.
 
 | call | what it does |
 |---|---|
-| `Open(name, flag, perm)` | Opens `name`, a clean absolute path, as `os.OpenFile` does, and never waits: on Unix it is made with `O_NONBLOCK`, so a pipe at `name` opens at once to be read, or is refused at once (`ENXIO`) to be written with no reader; a regular file or a folder reads and writes as without. One call on every system. It follows a link at any component and checks nothing of what it opened. A name that is not absolute, or not clean as `filepath.Clean` gives it, is refused with an `*fs.PathError` matching `fs.ErrInvalid`, and nothing is opened. |
+| `Open(name, flag, perm)` | Opens `name`, a clean absolute path, as `os.OpenFile` does, and never waits: on Unix it is made with `O_NONBLOCK`, so a pipe at `name` opens at once to be read, or is refused at once (`ENXIO`) to be written with no reader; a regular file or a folder reads and writes as without. One call on every system. It follows a link at any component and checks nothing of what it opened. A name that is not absolute, or not clean as `filepath.Clean` gives it, is refused with an `*fs.PathError` matching `fs.ErrInvalid`, and nothing is opened. On Windows it asks for no quality of service, as `os.OpenFile` asks none, so a name that is a pipe, or a link or a junction to one, gives the pipe's server the caller's token at impersonation, to act as the caller: a caller handed a name another account chose judges it with [`trust`](../trust/README.md) first. |
 
 ## Per system
 
 | call | Linux | macOS | Windows | FreeBSD and the others |
 |---|---|---|---|---|
-| `Open` | `open` with `O_NONBLOCK` | the same | `CreateFile`, as `os.OpenFile` makes it: an open there never waits for a pipe's other end | `open` with `O_NONBLOCK` on a Unix; on a system that is not Unix, `os.OpenFile` with no flag added |
+| `Open` | `open` with `O_NONBLOCK` | the same | `CreateFile`, as `os.OpenFile` makes it: an open there never waits for a pipe's other end, and asks for no quality of service, so a pipe's server, at a pipe name or at the end of a link, may act as the caller | `open` with `O_NONBLOCK` on a Unix; on a system that is not Unix, `os.OpenFile` with no flag added |
