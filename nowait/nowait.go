@@ -19,7 +19,10 @@ import (
 // to be written with no reader. A regular file or a folder reads and writes as without. It follows
 // a link at any component, as os.OpenFile does, and checks nothing of what it opened, so the
 // caller checks what it got. A name that is not absolute and clean is refused, matching
-// fs.ErrInvalid, and nothing is opened.
+// fs.ErrInvalid, and nothing is opened. On Windows it asks for no quality of service, as os.OpenFile
+// asks none, so a name that is a pipe, or a link or a junction to one, gives the pipe's server the
+// caller's token at impersonation, to act as the caller with every right its account holds: a caller
+// handed a name another account chose judges it with trust first.
 func Open(name string, flag int, perm fs.FileMode) (*os.File, error) {
 	if !filepath.IsAbs(name) || filepath.Clean(name) != name {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fmt.Errorf("it is not a clean absolute path: %w", fs.ErrInvalid)}
