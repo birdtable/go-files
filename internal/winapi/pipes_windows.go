@@ -82,21 +82,21 @@ func onPipes(name, why string, args ...any) error {
 // \\host\\IPC$ and \\host\IPC$. are on one. A path with no share is not on one.
 func PipesShare(path string) bool {
 	p := strings.ToLower(strings.ReplaceAll(path, `/`, `\`))
-	for _, prefix := range []string{`\\?\globalroot\device\mup\`, `\\.\globalroot\device\mup\`, `\??\globalroot\device\mup\`, `\device\mup\`, `\\?\unc\`, `\\.\unc\`, `\??\unc\`, `\\`} {
+	for _, prefix := range []string{`\device\mup\`, `\\?\unc\`, `\\.\unc\`, `\??\unc\`, `\\`} {
 		rest, ok := strings.CutPrefix(p, prefix)
 		if !ok {
 			continue
 		}
 		var parts []string
 		for part := range strings.SplitSeq(rest, `\`) {
-			if part != "" && (len(parts) > 0 || !strings.HasPrefix(part, ";")) {
+			if len(parts) > 0 || !strings.HasPrefix(part, ";") {
 				parts = append(parts, part)
 			}
 		}
 		if len(parts) < 2 {
 			return false
 		}
-		share := strings.TrimRight(parts[1], ". ")
+		share := parts[1]
 		return share == `ipc$` || share == `pipe`
 	}
 	return false
