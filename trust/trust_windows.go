@@ -25,11 +25,23 @@ const (
 // link (rule 5).
 const reparseAFUnix = 0x80000023
 
+// identify is SECURITY_SQOS_PRESENT with SECURITY_IDENTIFICATION, internal/winapi's Identify, which
+// trust may not import: where an open lands on a named pipe, its server may learn who the caller
+// is and act as it in nothing. The system reads the first as FILE_FLAG_OPEN_NO_RECALL too, which
+// changes no read of trust's: a file in remote storage is a reparse point, which trust takes for a
+// link (rule 5) and never reads.
+const identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IDENTIFICATION
+
+// createFile is windows.CreateFile with identify added to flags, trust's one CreateFile.
+func createFile(name *uint16, access, share, disposition, flags uint32, template windows.Handle) (windows.Handle, error) {
+	return windows.CreateFile(name, access, share, nil, disposition, flags|identify, template)
+}
+
 // local is this system's host: each name read from a handle opened on the name itself, the owners
 // above and this account trusted, and broken when this account's own SID cannot be read.
 func local() host {
 	me, err := self()
-	return host{look: look, ident: ident, readlink: os.Readlink, open: openRead, stat: statFile,
+	return host{look: look, ident: ident, readlink: os.Readlink, open: openRead, stat: statFile, //nolint:forbidigo // the walk reads a link in a folder it has judged, by an open of the link itself, never through it
 		root: []string{administrators, system, trustedInstaller}, me: me, broken: err}
 }
 
@@ -73,7 +85,7 @@ func ident(path string) (id fileID, err error) {
 	if err != nil {
 		return fileID{}, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
-	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+	h, err := createFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return fileID{}, &fs.PathError{Op: "open", Path: path, Err: err}
@@ -114,7 +126,7 @@ func openName(path string, access uint32) (windows.Handle, error) {
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
-	h, err := windows.CreateFile(p, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+	h, err := createFile(p, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: path, Err: err}
@@ -258,3 +270,18 @@ func ownerOf(f *os.File) (string, error) {
 // bySpelling is true: the system cleans a path by its spelling before it opens it, and takes a .. in
 // a relative link's target against the link's own folder, so the walk cleans them so too.
 const bySpelling = true
+
+// nameThere is whether the one name path is there, read as look reads it, by an open of the name
+// itself for its attributes alone that asks for identification, never os.Lstat, whose opens let a
+// pipe's server reached by a link on the way act as the caller: nil where it is, an error matching
+// fs.ErrNotExist where it is not.
+func nameThere(path string) error {
+	h, err := openName(path, windows.FILE_READ_ATTRIBUTES)
+	if err != nil {
+		return err
+	}
+	if err := windows.CloseHandle(h); err != nil {
+		return &fs.PathError{Op: "close", Path: path, Err: err}
+	}
+	return nil
+}

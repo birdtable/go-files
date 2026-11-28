@@ -191,14 +191,14 @@ func interpreters(path string, k shebang) ([]string, error) {
 // open does not wait, so a pipe put at p after that read is refused, never read, and the type is
 // read again on the descriptor, which is what is read from.
 func head(p string, size int) ([]byte, error) {
-	info, err := os.Stat(p)
+	info, err := os.Stat(p) //nolint:forbidigo // Interpreters reads no #! line on Windows, so no Windows program comes here
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
 		return nil, notRegular(p, info)
 	}
-	f, err := os.OpenFile(p, os.O_RDONLY|openNoWait, 0) //nolint:gosec // G304: Interpreters reads the path its caller names, and the interpreter that path names, and checks this descriptor
+	f, err := os.OpenFile(p, os.O_RDONLY|openNoWait, 0) //nolint:gosec,forbidigo // G304, and Interpreters reads no #! line on Windows: Interpreters reads the path its caller names, and the interpreter that path names, and checks this descriptor
 	if err != nil {
 		return nil, err
 	}

@@ -77,6 +77,22 @@ A refusal at a component is an `*fs.PathError` of op `walk` naming that componen
 finds it with `errors.As`, never by the text. When the kernel refuses, a walk afterwards names the
 component; it decides nothing.
 
+### Pipes and devices on Windows
+
+A path that names a device or a pipe, not a path on a drive or a volume (`\\.\`, or `\\?\` or `\??\`
+naming neither a drive nor a `Volume{GUID}`), is refused before anything is opened. Each look at a
+path by its name asks for identification alone, so a pipe a link or a junction leads to learns who
+the caller is and may act as it in nothing. A UNC path is not refused: an open of one connects to the
+named host and authenticates the caller to it, so a program that takes paths from another account
+refuses one itself, where `filepath.VolumeName` starts with `\\`.
+
+| guard | test |
+|---|---|
+| a device or pipe path refused, matching `fs.ErrInvalid`, before any open: `Resolve`, `Below`'s folder and path, `Nearest`'s start (matching `ErrOutside` too), `Folds`' root, and the target of `LinkFolder` and `LinkFile` | `TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen` |
+| a junction to a pipe, or to the pipes' folder with the pipe's name below it, is no folder or file to any call that takes a path | `TestAJunctionToAPipeIsNoFolderOrFileToConfine` |
+| `Resolve`'s walk looks by `winapi.Lstat` and reads links by `winapi.Readlink`, and a folder it passed turned to a junction to the pipes' folder is refused | `TestAFolderTheWalkPassedTurnedToAPipeIsNoFileToResolve`; the level in internal/winapi's tests |
+| no raw `CreateFile` and no by-name `os` open (`Stat`, `Lstat`, `Readlink`, `Open`, `OpenFile`, `OpenRoot`) in a file Windows builds | the lint's pipe-client and pipe-by-path rows |
+
 ### What a program does with `os.Root` alone
 
 | to | call | what it leaves out |

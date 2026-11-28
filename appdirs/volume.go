@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+
+	"github.com/birdtable/go-files/internal/fileid"
 )
 
 const opVolume = "volume"
@@ -107,5 +109,20 @@ func Volume(path string) (VolumeInfo, error) {
 	if err != nil {
 		return VolumeInfo{}, &fs.PathError{Op: opVolume, Path: path, Err: err}
 	}
+	if err := notDevice(opVolume, abs); err != nil {
+		return VolumeInfo{}, err
+	}
 	return askVolume(path, abs)
+}
+
+// notDevice refuses path, under op, where Windows reads it as a device or a pipe, not a path on a
+// drive or a volume: a \\.\ path, or a \\?\ one that names neither a drive nor a Volume{GUID}, as
+// fileid.DevicePath reads it, before anything opens it, with an *fs.PathError matching
+// fs.ErrInvalid. A UNC path is not refused: it names a share, which an open connects to,
+// authenticating the caller to its host. Elsewhere it refuses nothing.
+func notDevice(op, path string) error {
+	if fileid.DevicePath(path) {
+		return &fs.PathError{Op: op, Path: path, Err: fmt.Errorf("it names a device or a pipe, not a path on a drive or a volume: %w", fs.ErrInvalid)}
+	}
+	return nil
 }

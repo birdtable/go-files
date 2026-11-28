@@ -102,7 +102,7 @@ func rootName(r *os.Root) (string, fs.FileInfo, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	named, err := os.Stat(name)
+	named, err := sysStat(name)
 	if err == nil && !os.SameFile(held, named) {
 		err = &fs.PathError{Op: opCopy, Path: name, Err: fmt.Errorf("the root's name names another folder than the root holds now: %w", ErrOutside)}
 	}

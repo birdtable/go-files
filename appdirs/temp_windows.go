@@ -23,8 +23,8 @@ func realPath(p string) (string, error) {
 	if err != nil {
 		return "", &fs.PathError{Op: "open", Path: p, Err: err}
 	}
-	h, err := windows.CreateFile(name, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
-		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	h, err := winapi.CreateFile(name, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS)
 	if err != nil {
 		return "", &fs.PathError{Op: "open", Path: p, Err: err}
 	}
@@ -68,5 +68,5 @@ func dosPath(p string) string {
 // is made in it inherits. A volume that keeps no access lists is refused with ErrNoAccessList.
 // listless takes every volume as one (temp).
 func newFolder(dir string, listless bool) error {
-	return winapi.MakeFolder(os.Open, dir, winapi.Listless{Err: ErrNoAccessList, Test: listless})
+	return winapi.MakeFolder(os.Open, dir, winapi.Listless{Err: ErrNoAccessList, Test: listless}) //nolint:forbidigo // after trust.Path judged every folder above dir: no account but the trusted ones may change one, so none planted a junction to a pipe there
 }

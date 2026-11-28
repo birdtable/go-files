@@ -89,8 +89,8 @@ func indexAtPath(path string, held os.FileInfo, name string, changed error) erro
 	if err != nil {
 		return err
 	}
-	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
-		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	h, err := winapi.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS)
 	if err != nil {
 		return err
 	}

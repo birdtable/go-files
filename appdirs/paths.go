@@ -3,11 +3,20 @@
 // it is handed the system, the program's name, the home folder and a reader of the environment.
 // The README has each layout.
 //
+// On Windows a path that names a device or a pipe, not a path on a drive or a volume (\\.\, or
+// \\?\ or \??\ naming neither a drive nor a Volume{GUID}), is refused before anything is opened,
+// and Volume's, Free's and Temp's looks at a path by its name ask for identification alone, so a
+// pipe a link leads to learns who the caller is and may act as it in nothing. A UNC path
+// (\\host\share\...) is not refused: a share is a place for files, and an open of one connects to
+// the named host and authenticates the caller to it. A program that takes paths from another
+// account refuses UNC paths itself, where filepath.VolumeName starts with \\.
+//
 // Built on the XDG Base Directory layout, macOS's Library and Windows' LOCALAPPDATA, as
 // github.com/adrg/xdg reads them. os.UserConfigDir agrees on the XDG layout alone. On Windows it is
 // the roaming %AppData%, which appdirs never uses. It adds the system, home and environment handed
 // in, a Run and a Data folder, Here, System, Temp, Free and Volume. The program configures its name, the system, the home
 // folder, the environment reader, the Layout on macOS, and Temp's apart folders.
+//
 // It imports the standard library, golang.org/x/sys, trust, confine and internal/fileid, and on Windows internal/winapi.
 package appdirs
 

@@ -10,11 +10,21 @@
 // list that lets another account write it, or one they cannot read. On FreeBSD,
 // NetBSD and every other Unix, whose lists are not read, they refuse every name.
 //
+// On Windows a path that names a device or a pipe, not a path on a drive or a volume (\\.\, or
+// \\?\ or \??\ naming neither a drive nor a Volume{GUID}), is refused before anything is opened.
+// Each open trust makes of a name before it has judged the folders on the way asks for
+// identification alone, so a pipe a link leads to learns who the caller is and may act as it in
+// nothing; an open made after the judgement is of folders no other account may change. A UNC path
+// (\\host\share\...) is not refused: a share is a place for files, and an open of one connects to
+// the named host and authenticates the caller to it. A program that takes paths from another
+// account refuses UNC paths itself, where filepath.VolumeName starts with \\.
+//
 // Built on the rule of git's safe.directory and OpenSSH's StrictModes, every folder from the top
 // down root's or this account's and writable by no other, read through the standard library and
 // golang.org/x/sys. It adds that rule written once for every system, the access lists of Linux,
 // macOS and Windows, and the fix as data. The program configures whom it trusts (Who: RootOnly,
 // NoLinks, Group, Apart), the Kind of each path, and ReadOwned's owner, privacy and limit.
+//
 // It imports the standard library, golang.org/x/sys, confine and internal/fileid.
 package trust
 
@@ -30,6 +40,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/birdtable/go-files/internal/fileid"
 )
 
 // Kind is what the last name of a path must be. Every name before it must be a folder or a link.
@@ -379,6 +391,9 @@ func walk(path string, last Kind, who Who, h host) (string, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return "", &Unsafe{Path: path, Observed: strconv.Quote(path) + " is not an absolute, clean path"}
 	}
+	if err := device(path); err != nil {
+		return "", err
+	}
 	apart, err := apartOf(who.Apart, h)
 	if err != nil {
 		return "", err
@@ -398,6 +413,9 @@ func walkJudged(path string, last Kind, who Who, h host, apart []apartee) (strin
 		if err != nil || again == "" {
 			return got, err
 		}
+		if err := device(again); err != nil {
+			return "", err
+		}
 		rest = again
 	}
 	return "", &Unsafe{Path: path, Observed: path + " passes more than " + strconv.Itoa(maxLinks) + " links"}
@@ -410,6 +428,9 @@ func apartOf(paths []string, h host) ([]apartee, error) {
 	for _, p := range paths {
 		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
 			return nil, &Unsafe{Observed: "the folders named to be kept apart hold " + strconv.Quote(p) + ", which is not an absolute, clean path"}
+		}
+		if err := device(p); err != nil {
+			return nil, err
 		}
 		id, err := h.ident(p)
 		if err != nil {
@@ -569,6 +590,18 @@ func follow(n node, at place, who Who, h host) (string, error) {
 // refuse is the refusal of path, the name it is about, or of a setting of Who when path is "".
 func refuse(path, observed string, fix Fix, err error) *Unsafe {
 	return &Unsafe{Path: path, Observed: observed, Fix: fix, err: err}
+}
+
+// device refuses path where Windows reads it as a device or a pipe, not a path on a drive or a
+// volume: a \\.\ path, or a \\?\ one that names neither a drive nor a Volume{GUID}, as
+// fileid.DevicePath reads it, before anything opens it, so no open of trust's lands on a pipe whose
+// server learns who the caller is. A UNC path is not refused: it names a share, which an open
+// connects to, authenticating the caller to its host. Elsewhere it refuses nothing.
+func device(path string) error {
+	if fileid.DevicePath(path) {
+		return refuse(path, path+" names a device or a pipe, not a path on a drive or a volume", Fix{}, ErrNotPlain)
+	}
+	return nil
 }
 
 // trusted is whether owner is root's, or, unless who.RootOnly, this account's. An owner that is

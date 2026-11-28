@@ -58,6 +58,9 @@ func mkdirPrivate(dir string, who Who, reached func(step string)) (*os.Root, err
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return nil, refuse(dir, strconv.Quote(dir)+" is not an absolute, clean path", Fix{}, nil)
 	}
+	if err := device(dir); err != nil {
+		return nil, err
+	}
 	if who.RootOnly {
 		return nil, refuse("", "the setting RootOnly trusts no folder this account makes", Fix{}, ErrNotOwners)
 	}
@@ -96,7 +99,7 @@ func privateTry(dir string, who Who, at func(string)) (_ *os.Root, again bool, _
 	}
 	got, err := Path(dir, PrivateFolder, who)
 	if err == nil && made == nil {
-		made, err = os.OpenRoot(got)
+		made, err = os.OpenRoot(got) //nolint:forbidigo // after Path judged it: no account but the trusted ones may change a folder on its way, so none planted a junction to a pipe there
 	}
 	if err == nil {
 		at(stepDir)
@@ -117,12 +120,12 @@ func raced(err error) bool {
 	return errors.Is(err, confine.ErrNotEmpty) || errors.Is(err, fs.ErrNotExist)
 }
 
-// nearestPart is the longest part of dir that is there, each name read by os.Lstat, and the names
-// below it, in order.
+// nearestPart is the longest part of dir that is there, each name read by nameThere, on Windows by
+// an open that asks for identification alone, and the names below it, in order.
 func nearestPart(dir string) (string, []string, error) {
 	top, rest := dir, []string(nil)
 	for {
-		_, err := os.Lstat(top)
+		err := nameThere(top)
 		up := filepath.Dir(top)
 		switch {
 		case err == nil:
@@ -150,8 +153,8 @@ func above(top, first string, who Who, at func(string)) (string, bool, error) {
 		return "", false, err
 	}
 	base := filepath.Dir(pe.Path)
-	t, terr := os.Stat(top)
-	b, berr := os.Stat(base)
+	t, terr := os.Stat(top)  //nolint:forbidigo // after Path judged it: no account but the trusted ones may change a folder on its way, so none planted a junction to a pipe there
+	b, berr := os.Stat(base) //nolint:forbidigo // after Path judged it: no account but the trusted ones may change a folder on its way, so none planted a junction to a pipe there
 	if terr != nil || berr != nil || !os.SameFile(t, b) {
 		return "", false, err
 	}
@@ -160,7 +163,7 @@ func above(top, first string, who Who, at func(string)) (string, bool, error) {
 
 // makeBelow makes each folder of rest below base by confine.MkdirPrivate, and answers the last.
 func makeBelow(base string, rest []string) (*os.Root, error) {
-	root, err := os.OpenRoot(base)
+	root, err := os.OpenRoot(base) //nolint:forbidigo // base is a folder above, the walk of Path judged it: no account but the trusted ones may change a folder on its way
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +192,7 @@ func sameHeld(root *os.Root, got string, who Who) (err error) {
 	if err != nil {
 		return err
 	}
-	named, err := os.Lstat(got)
+	named, err := os.Lstat(got) //nolint:forbidigo // after Path judged it: no account but the trusted ones may change a folder on its way, so none planted a junction to a pipe there
 	if err != nil {
 		return err
 	}

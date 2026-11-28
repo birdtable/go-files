@@ -87,7 +87,10 @@ func temp(dir string, apart []string, between func(), listless bool) (string, er
 func tempAs(dir string, who trust.Who, between func(), listless bool) (string, error) {
 	apart := who.Apart
 	for _, a := range apart {
-		if _, err := os.Stat(a); err != nil { // before anything is made
+		if err := notDevice("temp", a); err != nil {
+			return "", err
+		}
+		if _, err := sysStat(a); err != nil { // before anything is made
 			return "", err
 		}
 	}
@@ -126,7 +129,7 @@ func missing(err error, dir string) bool {
 // holdsNone refuses dir when it holds a folder of apart: each one's way, as written and as its links
 // resolve, is read by file ID, with no judgement, and a folder of it that is dir is ErrInside.
 func holdsNone(dir string, apart []string) error {
-	d, err := os.Stat(dir)
+	d, err := sysStat(dir)
 	if err != nil {
 		return err
 	}
@@ -154,7 +157,7 @@ func holdsNone(dir string, apart []string) error {
 // onWay is whether d is p or a folder above it, each read through its links by file ID.
 func onWay(p string, d os.FileInfo) (bool, error) {
 	for ; ; p = filepath.Dir(p) {
-		f, err := os.Stat(p)
+		f, err := sysStat(p)
 		if err != nil {
 			return false, err
 		}

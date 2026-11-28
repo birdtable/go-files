@@ -11,10 +11,19 @@
 // root to root, making each link inside it again and refusing one that leads outside.
 // The README says how, on each system.
 //
+// On Windows a path that names a device or a pipe, not a path on a drive or a volume (\\.\, or
+// \\?\ or \??\ naming neither a drive nor a Volume{GUID}), is refused before anything is opened,
+// and each look at a path by its name, Resolve's walk and Below's, Nearest's and Folds' among them,
+// asks for identification alone, so a pipe a link leads to learns who the caller is and may act as
+// it in nothing. A UNC path (\\host\share\...) is not refused: a share is a place for files, and an
+// open of one connects to the named host and authenticates the caller to it. A program that takes
+// paths from another account refuses UNC paths itself, where filepath.VolumeName starts with \\.
+//
 // Built on os.Root, and golang.org/x/sys for openat2 on Linux and the Windows calls. It adds no
 // link followed at any component, renames that never replace or that swap, folders made by handle
 // and a link to a folder. The program configures the root, each name, and each call's flags and
 // mode.
+//
 // It imports the standard library, golang.org/x/sys, golang.org/x/text/unicode/norm and internal/fileid, and on Windows internal/winapi.
 package confine
 
