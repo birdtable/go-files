@@ -73,7 +73,12 @@ func volume(t *testing.T, kind, want, img, mnt string) {
 	if err := os.Mkdir(mnt, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { detach(t, img, ejects()) })
+	t.Cleanup(func() {
+		detach(t, img, ejects())
+		if disk, err := imageDisk(img); err == nil && disk != "" {
+			holders(t, mnt)
+		}
+	})
 	if out, err := exec.CommandContext(t.Context(), "/usr/bin/hdiutil", "attach", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
 		t.Fatalf("hdiutil attach: %v: %s", err, out)
 	}
@@ -81,6 +86,27 @@ func volume(t *testing.T, kind, want, img, mnt string) {
 	if err := unix.Statfs(mnt, &st); err != nil || unix.ByteSliceToString(st.Fstypename[:]) != want || unix.ByteSliceToString(st.Mntonname[:]) != mnt {
 		t.Fatalf("the image on %s: type %q on %q, %v, and want %s mounted on it", mnt, unix.ByteSliceToString(st.Fstypename[:]), unix.ByteSliceToString(st.Mntonname[:]), err, want)
 	}
+}
+
+// holders logs, for an image its cleanup could not take off, every volume still mounted on or
+// beneath mnt, as getfsstat lists them, and what lsof says this account has open there, so a red
+// run names what held the image.
+func holders(t testing.TB, mnt string) {
+	t.Helper()
+	var on []string
+	n, err := unix.Getfsstat(nil, unix.MNT_NOWAIT)
+	if err == nil {
+		all := make([]unix.Statfs_t, n)
+		if n, err = unix.Getfsstat(all, unix.MNT_NOWAIT); err == nil {
+			for _, m := range all[:n] {
+				if at := unix.ByteSliceToString(m.Mntonname[:]); at == mnt || strings.HasPrefix(at, mnt+"/") {
+					on = append(on, unix.ByteSliceToString(m.Fstypename[:])+" from "+unix.ByteSliceToString(m.Mntfromname[:])+" on "+at)
+				}
+			}
+		}
+	}
+	out, lerr := exec.Command("/usr/sbin/lsof", "-n", "-P", "+f", "--", mnt).CombinedOutput() //nolint:noctx,gosec // the test's context has ended by its cleanup; G204: lsof by its full path, on the test's own folder
+	t.Logf("the image's cleanup, not the rule: mounted on or beneath %s: %q (%v); lsof of it (%v):\n%s", mnt, on, err, lerr, out)
 }
 
 // ejects are the ways tried, in order, to take an image off, as trust's tests try them: diskutil's
