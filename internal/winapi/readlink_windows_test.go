@@ -78,7 +78,7 @@ func TestLinkTargetRefusesABufferItsLengthsDoNotFit(t *testing.T) {
 		notThere bool
 	}{
 		{"a header cut short", buffer(mountPoint, 0, 0, 0)[:15], false},
-		{"a link's flags cut short", buffer(symlink, 0, 0, 0)[:19], false},
+		{"a link's flags cut short", buffer(symlink, 0, 0, 3), false},
 		{"a name past the names", buffer(mountPoint, 0, 8, 6), false},
 		{"a name at an odd offset", buffer(mountPoint, 1, 2, 6), false},
 		{"a name of an odd length", buffer(mountPoint, 0, 3, 6), false},

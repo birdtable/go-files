@@ -105,6 +105,9 @@ func (v VolumeInfo) Local() bool { return v.Kind == Local }
 // ~/Documents outside Library; until go-files#19's run proves them, take SyncPlaceholder on either
 // as best effort.
 func Volume(path string) (VolumeInfo, error) {
+	if err := notDevice(opVolume, path); err != nil {
+		return VolumeInfo{}, err
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return VolumeInfo{}, &fs.PathError{Op: opVolume, Path: path, Err: err}

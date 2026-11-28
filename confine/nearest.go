@@ -12,9 +12,11 @@ import (
 // is refused too, matching ErrOutside. start is made absolute and clean and walked up by its own
 // names: no link in it is resolved, so pass Resolve(start) for the walk of the real folders. Each
 // folder is asked with os.Lstat, on Windows by an open of its own that asks for identification
-// alone, so a marker that is a link counts, a dangling one too. On Windows a start that names a
-// device or a pipe, not a path on a drive or a volume, is refused before any look, matching
-// fs.ErrInvalid and ErrOutside. A folder
+// alone, so a marker that is a link counts, a dangling one too. A marker that is a pipe, a device
+// or a socket is no file or folder: it stops the walk, refused matching fs.ErrInvalid. On Windows a
+// start that names a device or a pipe, not a path on a drive or a volume, is refused before any
+// look, matching fs.ErrInvalid and ErrOutside, read as given and again once absolute, as Go takes
+// a \??\ path for one on the working drive. A folder
 // without marker, or whose marker's inner name is not a folder, sends the walk up; any other error
 // stops it and is returned, so a folder that cannot be read is never taken for one with no marker.
 // top is the last folder asked, "" the volume's top (/, C:\, \\host\share\). A top that is not
@@ -31,6 +33,9 @@ func nearest(start, marker, top string, look func(string) (fs.FileInfo, error)) 
 		err = fmt.Errorf("an empty marker names no file: %w", ErrOutside)
 	}
 	if err != nil {
+		return "", err
+	}
+	if err := notDevice("nearest", start); err != nil {
 		return "", err
 	}
 	dir, err := filepath.Abs(start)
@@ -51,7 +56,10 @@ func nearest(start, marker, top string, look func(string) (fs.FileInfo, error)) 
 		}
 	}
 	for _, d := range walk {
-		_, err := look(filepath.Join(d, name))
+		fi, err := look(filepath.Join(d, name))
+		if err == nil && fi.Mode().Type()&(fs.ModeNamedPipe|fs.ModeDevice|fs.ModeCharDevice|fs.ModeSocket) != 0 {
+			return "", &fs.PathError{Op: "nearest", Path: filepath.Join(d, name), Err: fmt.Errorf("the marker is a pipe, a device or a socket, no file or folder: %w", fs.ErrInvalid)}
+		}
 		if err == nil {
 			return d, nil
 		}

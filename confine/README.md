@@ -89,7 +89,8 @@ refuses one itself, where `filepath.VolumeName` starts with `\\`.
 | guard | test |
 |---|---|
 | a device or pipe path refused, matching `fs.ErrInvalid`, before any open: `Resolve`, `Below`'s folder and path, `Nearest`'s start (matching `ErrOutside` too), `Folds`' root, and the target of `LinkFolder` and `LinkFile` | `TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen` |
-| a junction to a pipe, or to the pipes' folder with the pipe's name below it, is no folder or file to any call that takes a path | `TestAJunctionToAPipeIsNoFolderOrFileToConfine` |
+| a junction to a pipe, or to the pipes' folder with the pipe's name below it, is no folder or file to any call that takes a path; `Nearest` takes the junction itself as a marker, as any link, without reaching the pipe | `TestAJunctionToAPipeIsNoFolderOrFileToConfine` |
+| `Nearest`'s marker that is a pipe, a device or a socket, on every system, refused matching `fs.ErrInvalid` where it is found, no folder above asked; `Nearest`'s device check made on the start as given, before it is made absolute, as Go takes `\??\` for a path on the working drive | `TestNearestRefusesAMarkerThatIsAPipeADeviceOrASocket`, `TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen` |
 | `Resolve`'s walk looks by `winapi.Lstat` and reads links by `winapi.Readlink`, and a folder it passed turned to a junction to the pipes' folder is refused | `TestAFolderTheWalkPassedTurnedToAPipeIsNoFileToResolve`; the level in internal/winapi's tests |
 | no raw `CreateFile` and no by-name `os` open (`Stat`, `Lstat`, `Readlink`, `Open`, `OpenFile`, `OpenRoot`) in a file Windows builds | the lint's pipe-client and pipe-by-path rows |
 
