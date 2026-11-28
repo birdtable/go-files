@@ -14,8 +14,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// finalRefusesASecondName is whether Final refuses a file with a second name here: Linux answers a file with a second name by the name it was opened by.
-const finalRefusesASecondName = false
+// finalFoldersOnly is whether Final answers only a folder here, and refuses a file: Linux answers a file, one with a second name by the name it was opened by.
+const finalFoldersOnly = false
 
 func TestOnLinuxFinalAnswersANameThisAccountMayNotRead(t *testing.T) {
 	t.Parallel()

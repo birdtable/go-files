@@ -11,10 +11,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// errFinalLinks is Final's refusal on macOS of a file with more than one name: F_GETPATH answers
-// whichever of its names any process looked at last, which may be in another folder than the
-// path's, so the answer is not a key for the file.
-var errFinalLinks = fmt.Errorf("it has more than one name, a hard link, and macOS names such a file by whichever name was looked at last: %w", errors.ErrUnsupported)
+// errFinalNotFolder is Final's refusal on macOS of anything but a folder: F_GETPATH answers
+// whichever of a file's names any process looked at last, which may be in another folder than the
+// path's, and a second name linked, looked at and unlinked between any two reads is told by no
+// count of names, so the answer is no key for a file.
+var errFinalNotFolder = fmt.Errorf("it is not a folder, and macOS names a file by whichever of its names was looked at last, which no count of names can rule out: %w", errors.ErrUnsupported)
 
 // finalType is whether t, fstatfs's type name, is a file system Final answers on, on macOS: apfs,
 // which gives a folder no second name and answers a name's stored spelling. On any other, HFS+,
@@ -60,19 +61,12 @@ func finalVolumes(f *os.File, name string) error {
 	}
 }
 
-// finalHeld refuses held, the file Final opened, read after its name, where it is not a folder and
-// has more than one name. A folder is answered: finalVolumes answers only on apfs, which gives a
-// folder no second name.
+// finalHeld refuses held, the file Final opened, read after its name, unless it is a folder:
+// finalVolumes answers only on apfs, which gives a folder no second name, and a file's names are
+// ruled out by no count, read before the name or after it.
 func finalHeld(held fs.FileInfo) error {
-	if held.IsDir() {
-		return nil
-	}
-	n, err := linkCount(nil, held)
-	if err != nil {
-		return err
-	}
-	if n > 1 {
-		return errFinalLinks
+	if !held.IsDir() {
+		return errFinalNotFolder
 	}
 	return nil
 }

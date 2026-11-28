@@ -9,8 +9,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// finalRefusesASecondName is whether Final refuses a file with a second name here: Windows answers a file with a second name by the name it was opened by.
-const finalRefusesASecondName = false
+// finalFoldersOnly is whether Final answers only a folder here, and refuses a file: Windows answers a file, one with a second name by the name it was opened by.
+const finalFoldersOnly = false
 
 // finalShortName is path's 8.3 short name, or path itself where the volume makes none.
 func finalShortName(t *testing.T, path string) string {

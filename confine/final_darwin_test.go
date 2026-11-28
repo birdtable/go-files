@@ -11,8 +11,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// finalRefusesASecondName is whether Final refuses a file with a second name here: macOS refuses a file with a second name, as F_GETPATH answers the name looked at last.
-const finalRefusesASecondName = true
+// finalFoldersOnly is whether Final answers only a folder here, and refuses a file: macOS does, as F_GETPATH answers the name of a file looked at last.
+const finalFoldersOnly = true
 
 func TestOnMacOSFinalAnswersOneNameThroughTheDataVolumesFirmlink(t *testing.T) {
 	t.Parallel()
@@ -37,6 +37,12 @@ func TestOnMacOSFinalOfANameThisAccountMayNotReadIsErrPermission(t *testing.T) {
 	for _, p := range []string{file, folder} {
 		got, err := Final(p)
 		if os.Geteuid() == 0 {
+			if p == file {
+				if !errors.Is(err, errors.ErrUnsupported) || got != "" {
+					t.Errorf("Final of %s as root, no folder = %q, %v, and want errors.ErrUnsupported", p, got, err)
+				}
+				continue
+			}
 			if err != nil || got != p {
 				t.Errorf("Final of %s as root = %q, %v, and want its own name", p, got, err)
 			}

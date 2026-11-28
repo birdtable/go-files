@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -29,6 +30,22 @@ func finalOK(t *testing.T, path string) string {
 	return got
 }
 
+// finalFile checks Final's answer for path, which is no folder: want, or, where Final answers only
+// a folder, as on macOS, errors.ErrUnsupported and no name.
+func finalFile(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := Final(path)
+	if finalFoldersOnly {
+		if !errors.Is(err, errors.ErrUnsupported) || got != "" {
+			t.Errorf("Final of %s, no folder, here = %q, %v, and want errors.ErrUnsupported", path, got, err)
+		}
+		return
+	}
+	if err != nil || got != want {
+		t.Errorf("Final(%q) = %q, %v, and want %q", path, got, err, want)
+	}
+}
+
 func TestFinalAnswersOneNameForEachSpellingThroughALinkedParent(t *testing.T) {
 	t.Parallel()
 	tmp := finalTemp(t)
@@ -50,9 +67,7 @@ func TestFinalAnswersOneNameForEachSpellingThroughALinkedParent(t *testing.T) {
 		if got := finalOK(t, path); got != want {
 			t.Errorf("Final(%q) = %q, and want %q", path, got, want)
 		}
-		if got := finalOK(t, filepath.Join(path, "File.txt")); got != filepath.Join(want, "File.txt") {
-			t.Errorf("Final of File.txt in %q = %q, and want %q", path, got, filepath.Join(want, "File.txt"))
-		}
+		finalFile(t, filepath.Join(path, "File.txt"), filepath.Join(want, "File.txt"))
 	}
 	if got := finalOK(t, want); finalOK(t, got) != got {
 		t.Errorf("Final of its own answer %q is another name", got)
@@ -94,9 +109,7 @@ func TestFinalAnswersALinkAtTheLastNameItself(t *testing.T) {
 		t.Fatal(err)
 	}
 	plantFolderLink(t, tmp, "target", "link")
-	if got, want := finalOK(t, filepath.Join(tmp, "link")), filepath.Join(tmp, "link"); got != want {
-		t.Errorf("Final of the link = %q, and want the link's own name %q", got, want)
-	}
+	finalFile(t, filepath.Join(tmp, "link"), filepath.Join(tmp, "link"))
 	resolved, err := Resolve(filepath.Join(tmp, "link"))
 	if err != nil {
 		t.Fatal(err)
@@ -107,9 +120,7 @@ func TestFinalAnswersALinkAtTheLastNameItself(t *testing.T) {
 	if err := os.Remove(filepath.Join(tmp, "target")); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := finalOK(t, filepath.Join(tmp, "link")), filepath.Join(tmp, "link"); got != want {
-		t.Errorf("Final of the link to nothing = %q, and want the link's own name %q", got, want)
-	}
+	finalFile(t, filepath.Join(tmp, "link"), filepath.Join(tmp, "link"))
 }
 
 func TestUndeviceDropsThePrefixOnlyWhereTheNameReadsTheSameWithout(t *testing.T) {
@@ -167,20 +178,20 @@ func TestFinalRefusesARelativePathAndANameThatIsNotThere(t *testing.T) {
 func TestFinalRefusesANameThatIsNotTheFileOpened(t *testing.T) {
 	t.Parallel()
 	tmp := finalTemp(t)
-	file, other := filepath.Join(tmp, "file"), filepath.Join(tmp, "other")
-	for _, p := range []string{file, other} {
-		if err := os.WriteFile(p, nil, 0o600); err != nil {
+	dir, other := filepath.Join(tmp, "dir"), filepath.Join(tmp, "other")
+	for _, p := range []string{dir, other} {
+		if err := os.Mkdir(p, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, answered := range []string{other, filepath.Join(tmp, "gone"), file + " (deleted)"} {
-		_, err := final(file, func(*os.File) (string, error) { return answered, nil }, os.Lstat)
+	for _, answered := range []string{other, filepath.Join(tmp, "gone"), dir + " (deleted)"} {
+		_, err := final(dir, func(*os.File) (string, error) { return answered, nil }, os.Lstat)
 		if !errors.Is(err, ErrChanged) || !errors.Is(err, ErrOutside) {
 			t.Errorf("Final where the system answers %q: %v, and want ErrChanged and ErrOutside", answered, err)
 		}
 	}
-	if got, err := final(file, func(*os.File) (string, error) { return file, nil }, os.Lstat); err != nil || got != file {
-		t.Errorf("Final where the system answers the file's own name = %q, %v, and want it with no error", got, err)
+	if got, err := final(dir, func(*os.File) (string, error) { return dir, nil }, os.Lstat); err != nil || got != dir {
+		t.Errorf("Final where the system answers the folder's own name = %q, %v, and want it with no error", got, err)
 	}
 }
 
@@ -229,7 +240,7 @@ func TestFinalOfAFileWithASecondNameAnswersTheNameOpenedOrOnMacOSIsRefused(t *te
 	}
 	for _, p := range []string{a, b} {
 		got, err := final(p, look, os.Lstat)
-		if finalRefusesASecondName {
+		if finalFoldersOnly {
 			if !errors.Is(err, errors.ErrUnsupported) || got != "" {
 				t.Errorf("Final on macOS of %s, a file with a second name, while %s is looked at = %q, %v, and want errors.ErrUnsupported", p, b, got, err)
 			}
@@ -245,9 +256,10 @@ func TestFinalOfAFileWithASecondNameAnswersTheNameOpenedOrOnMacOSIsRefused(t *te
 }
 
 // What it costs when this fails: the race test's window, held open: a second name b of the file
-// is looked at, so macOS's F_GETPATH answers it; unlinked before the open file is counted, so that
-// count is 1; and linked again before b is looked at, so os.SameFile passes it. Final answers b,
-// a name in another folder than the one opened, and a journal keys one file by two names.
+// is linked and looked at, so macOS's F_GETPATH answers it; unlinked before the open file is read,
+// so a count of its names there is 1; and linked again before b is looked at, so os.SameFile
+// passes it. Final answers b, a name in another folder than the one opened, and a journal keys one
+// file by two names.
 func TestFinalOfAFileWhoseSecondNameIsUnlinkedAndLinkedBetweenItsReadsAnswersNoOtherName(t *testing.T) {
 	t.Parallel()
 	tmp := finalTemp(t)
@@ -280,7 +292,7 @@ func TestFinalOfAFileWhoseSecondNameIsUnlinkedAndLinkedBetweenItsReadsAnswersNoO
 		return os.Lstat(name)
 	}
 	got, err := final(a, read, lstat)
-	if !finalRefusesASecondName {
+	if !finalFoldersOnly {
 		if err != nil || got != a {
 			t.Errorf("Final(%s), its second name unlinked and linked again between its reads = %q, %v, and want the name opened", a, got, err)
 		}
@@ -294,13 +306,59 @@ func TestFinalOfAFileWhoseSecondNameIsUnlinkedAndLinkedBetweenItsReadsAnswersNoO
 	}
 }
 
-// finalRaceCalls is how many times the race test calls Final.
+// finalRaceCalls is how many times each race test calls Final.
 const finalRaceCalls = 200_000
+
+// finalRace calls Final on p finalRaceCalls times while another goroutine runs race over and over,
+// and answers how many calls were refused with an error refused passes. It fails the test on any
+// other error, on any name but p, and where race, which answers whether it did what it is for,
+// never once did.
+func finalRace(t *testing.T, p string, race func() bool, refused func(error) bool) int {
+	t.Helper()
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	var ran atomic.Int64
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if race() {
+				ran.Add(1)
+			}
+		}
+	}()
+	n, wrong := 0, map[string]int{}
+	for range finalRaceCalls {
+		got, err := Final(p)
+		switch {
+		case err == nil && got != p:
+			wrong[got]++
+		case err != nil && refused(err):
+			n++
+		case err != nil:
+			t.Errorf("Final(%s) under the race: %v", p, err)
+		}
+	}
+	close(stop)
+	<-stopped
+	t.Logf("%d calls under a race that ran %d times: %d refused, %d wrong names", finalRaceCalls, ran.Load(), n, len(wrong))
+	if ran.Load() == 0 {
+		t.Errorf("the race on %s never once ran, so the test tells nothing", p)
+	}
+	for name, k := range wrong {
+		t.Errorf("Final(%s) under the race answered %s %d times, and want no name but its own", p, name, k)
+	}
+	return n
+}
 
 // What it costs when this fails: on macOS, another process links a second name of a file in another
 // folder, looks at it and unlinks it, over and over, and one of Final's answers is that second
-// name, read when F_GETPATH answered it and passed by a count read while it was unlinked: a
-// journal keys one file by two names.
+// name, which F_GETPATH answered while it was there and no count of names tells: a journal keys one
+// file by two names. So macOS refuses every call, as a file is no folder, and Linux and Windows
+// answer the name opened every time.
 func TestFinalUnderALinkLookUnlinkRaceAnswersNoOtherName(t *testing.T) {
 	t.Parallel()
 	tmp := finalTemp(t)
@@ -311,39 +369,42 @@ func TestFinalUnderALinkLookUnlinkRaceAnswersNoOtherName(t *testing.T) {
 	if err := os.Mkdir(filepath.Dir(b), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stop, stopped := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(stopped)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			_ = os.Link(a, b)
-			_, _ = os.Lstat(b)
-			_ = os.Remove(b)
+	refused := finalRace(t, a, func() bool {
+		if os.Link(a, b) != nil {
+			return false
 		}
-	}()
-	refused, wrong := 0, map[string]int{}
-	for range finalRaceCalls {
-		got, err := Final(a)
-		switch {
-		case err == nil && got != a:
-			wrong[got]++
-		case err != nil && finalRefusesASecondName && (errors.Is(err, errors.ErrUnsupported) || errors.Is(err, ErrChanged)):
-			refused++
-		case err != nil:
-			t.Errorf("Final(%s) under the race: %v, and want its own name", a, err)
+		_, _ = os.Lstat(b)
+		_ = os.Remove(b)
+		return true
+	}, func(err error) bool { return finalFoldersOnly && errors.Is(err, errors.ErrUnsupported) })
+	if finalFoldersOnly && refused != finalRaceCalls {
+		t.Errorf("Final(%s), a file, under the race on macOS was refused %d times of %d, and want every one", a, refused, finalRaceCalls)
+	}
+}
+
+// What it costs when this fails: on macOS, another process looks at a folder by other names, in
+// another case and through a link to its parent, and tries to give it a second name by link(2),
+// over and over, and one of Final's answers is a name the folder is not stored by: a journal keys
+// one folder by two names.
+func TestFinalOfAFolderUnderARaceOfLooksByOtherNamesAnswersNoOtherName(t *testing.T) {
+	t.Parallel()
+	tmp := finalTemp(t)
+	dir := filepath.Join(tmp, "sub", "Folder")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(tmp, "other"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plantFolderLink(t, tmp, "sub", "via")
+	upper, via, second := filepath.Join(tmp, "sub", "FOLDER"), filepath.Join(tmp, "via", "Folder"), filepath.Join(tmp, "other", "b")
+	finalRace(t, dir, func() bool {
+		_, errUpper := os.Lstat(upper)
+		_, errVia := os.Lstat(via)
+		if os.Link(dir, second) == nil {
+			_, _ = os.Lstat(second)
+			_ = os.Remove(second)
 		}
-	}
-	close(stop)
-	<-stopped
-	t.Logf("%d calls under the race: %d refused, %d wrong names", finalRaceCalls, refused, len(wrong))
-	for name, n := range wrong {
-		t.Errorf("Final(%s) under the race answered %s %d times, and want no name but its own", a, name, n)
-	}
-	if finalRefusesASecondName && refused == 0 {
-		t.Errorf("Final(%s) under the race was refused no time on macOS, so the race the test wants did not run", a)
-	}
+		return errUpper == nil || errVia == nil
+	}, func(error) bool { return false })
 }
