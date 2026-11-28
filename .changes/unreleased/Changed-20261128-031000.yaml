@@ -1,0 +1,3 @@
+kind: Changed
+body: 'The repository''s tidy check, in task tidy and in CI, tidies tools/hatch.mod alone, as the go.mod of an empty folder, and tools/hatch.mod holds hatch''s own closure at the same versions. It names a module of its own that requires the published go-files, so tidied over the tree it had to find each package the tree imports in that release, and a package the tree adds was red until a release held it. The library is unchanged.'
+time: 2026-11-28T03:10:00.000000+01:00

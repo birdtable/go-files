@@ -379,7 +379,20 @@ tasks:
       - rm -f .task/pass/tidy-{{.GOVERSION}}
       - cmd: |
           go mod tidy -diff || exit 1
-          for mod in tools/*.mod; do go mod tidy -modfile="$mod" -diff || exit 1; done
+          for mod in tools/*.mod; do
+            [ "$mod" = tools/hatch.mod ] && continue
+            go mod tidy -modfile="$mod" -diff || exit 1
+          done
+        timeout: 2m
+      # tools/hatch.mod names a module of its own, which requires the published go-files. Tidied over
+      # the tree, it must resolve each package the tree imports from that release, so a package the
+      # tree adds is red until a release holds it. It is tidied alone, as the go.mod of an empty
+      # folder, and holds hatch's own closure.
+      - cmd: |
+          work=$(TMPDIR="${TMPDIR:-${TEMP:-/tmp}}" mktemp -d) || exit 1
+          trap 'rm -rf "$work"' EXIT
+          cp tools/hatch.mod "$work/go.mod" && cp tools/hatch.sum "$work/go.sum" || exit 1
+          go -C "$work" mod tidy -diff || { echo "tidy: tools/hatch.mod, tidied alone, is not tidy" >&2; exit 1; }
         timeout: 2m
       # go.mod requires testkit for the tests, and nothing it requires, however far
       # down, is go-proc, out of which testkit was moved. depguard's code rows refuse testkit to
