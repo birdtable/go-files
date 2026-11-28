@@ -257,7 +257,7 @@ func joinClose(err error, c io.Closer) error {
 // a plain file, and a failed ask fails every test that wants the program.
 func taskProgram(t *testing.T) string {
 	t.Helper()
-	asked.once.Do(func() { asked.path, asked.err = askTask(t) })
+	askTaskOnce(t)
 	if asked.err != nil {
 		t.Fatal(asked.err)
 	}
@@ -335,6 +335,13 @@ var asked struct { //nolint:gochecknoglobals // the test binary asks go tool for
 	once sync.Once
 	path string
 	err  error
+}
+
+// askTaskOnce runs askTask once in the test binary, in the context of the test that asks first,
+// and keeps what it found in asked.
+func askTaskOnce(t *testing.T) {
+	t.Helper()
+	asked.once.Do(func() { asked.path, asked.err = askTask(t) })
 }
 
 // askTask asks go tool -n for the task program's path, in the context of the test that asks first,
@@ -743,19 +750,29 @@ var pushTools struct { //nolint:gochecknoglobals // the test binary builds pre-p
 }
 
 // warmPushTools builds pushTools once, as Taskfile.yml's warm does, and fails the test where a
-// build fails.
+// build fails. It asks for taskProgram beside them, so the three runs of go tool -n go at once:
+// one after another they were near a second on a loaded Mac, all of it before the hang guard's
+// tier could start (go-files#34).
 func warmPushTools(t *testing.T) {
 	t.Helper()
 	pushTools.once.Do(func() {
-		for _, tool := range []string{"hatch", "task"} {
-			cmd := exec.CommandContext(t.Context(), "go", "tool", "-modfile=tools/"+tool+".mod", "-n", tool) //nolint:gosec // G204: go tool and a name spelled out here; no shell reads them
-			isolate(cmd)
-			cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
-			if out, err := cmd.CombinedOutput(); err != nil {
-				pushTools.err = fmt.Errorf("go tool -n %s with cgo off: %w: %s", tool, err, out)
-				return
-			}
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i, tool := range []string{"hatch", "task"} {
+			wg.Go(func() {
+				cmd := exec.CommandContext(t.Context(), "go", "tool", "-modfile=tools/"+tool+".mod", "-n", tool) //nolint:gosec // G204: go tool and a name spelled out here; no shell reads them
+				isolate(cmd)
+				cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					errs[i] = fmt.Errorf("go tool -n %s with cgo off: %w: %s", tool, err, out)
+				}
+			})
 		}
+		// taskProgram's own ask, which returns its error rather than failing t, so it may run here;
+		// taskProgram fails the test that wants the program where it failed.
+		wg.Go(func() { askTaskOnce(t) })
+		wg.Wait()
+		pushTools.err = errors.Join(errs...)
 	})
 	if pushTools.err != nil {
 		t.Fatal(pushTools.err)
