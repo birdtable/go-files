@@ -20,13 +20,14 @@ type How struct {
 }
 
 // OpenAt opens name in the folder open at dir as how says, with SYNCHRONIZE, following no reparse
-// point. The error is NtCreateFile's NTSTATUS.
+// point, with a quality of service of identification and static tracking, so where it lands on a
+// named pipe its server may act as the caller in nothing. The error is NtCreateFile's NTSTATUS.
 func OpenAt(dir windows.Handle, name string, how How) (h windows.Handle, err error) {
 	u, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return 0, err
 	}
-	attrs := windows.OBJECT_ATTRIBUTES{Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: dir, ObjectName: u, Attributes: how.Attributes, SecurityDescriptor: how.security}
+	attrs := windows.OBJECT_ATTRIBUTES{Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: dir, ObjectName: u, Attributes: how.Attributes, SecurityDescriptor: how.security, SecurityQoS: identifyOnly()}
 	err = windows.NtCreateFile(&h, how.Access|windows.SYNCHRONIZE, &attrs, &windows.IO_STATUS_BLOCK{}, nil, 0,
 		how.Share, how.Disposition, how.Options|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
 	return h, err

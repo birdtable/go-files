@@ -68,6 +68,11 @@ type copier struct {
 
 // copyTree is CopyTree, calling reached at each of its steps, so a test swaps there.
 func copyTree(dst, src *os.Root, reached func(step string)) error {
+	for _, r := range []*os.Root{dst, src} {
+		if err := rootOnPipes(r, "."); err != nil {
+			return err
+		}
+	}
 	to, held, err := rootName(dst)
 	if err != nil {
 		return err
@@ -102,7 +107,7 @@ func rootName(r *os.Root) (string, fs.FileInfo, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	named, err := os.Stat(name)
+	named, err := sysStat(name)
 	if err == nil && !os.SameFile(held, named) {
 		err = &fs.PathError{Op: opCopy, Path: name, Err: fmt.Errorf("the root's name names another folder than the root holds now: %w", ErrOutside)}
 	}

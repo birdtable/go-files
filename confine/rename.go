@@ -40,6 +40,9 @@ func renameIn(root *os.Root, from, to string, exchange bool) error {
 			return err
 		}
 	}
+	if err := rootOnPipes(root, from); err != nil {
+		return err
+	}
 	if exchange && !swaps {
 		return &fs.PathError{Op: opRename, Path: filepath.ToSlash(from), Err: fmt.Errorf("this system has no such call: %w", ErrNoExchange)}
 	}

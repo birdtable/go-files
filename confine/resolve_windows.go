@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/birdtable/go-files/internal/winapi"
 )
 
 // bySpelling is true: the system takes a .. in a relative link target by its spelling, against
@@ -16,13 +18,15 @@ const bySpelling = true
 
 // readLink answers the target of the link or junction at next and whether the walk follows it. A
 // mount point of a whole volume, where the mount manager lists next among the volume's paths, is
-// kept as a folder. It refuses, matching ErrOutside: another reparse point that Go reports as
-// irregular, which os.Readlink does not read; a target with a name that ends in a dot or a space;
+// kept as a folder. The link is read by winapi.Readlink, whose open of next asks for
+// identification alone, so a pipe at next never gets to act as the caller. It refuses, matching
+// ErrOutside: another reparse point that Go reports as irregular, which winapi.Readlink, as
+// os.Readlink, does not read; a target with a name that ends in a dot or a space;
 // a junction's target that is not absolute, as no junction's is but one the walk cannot read; and
 // a \\.\ target, or a \\?\ one that is not such a mount point.
 func readLink(next string, fi fs.FileInfo) (string, bool, error) {
 	junction := fi.Mode()&fs.ModeSymlink == 0
-	target, err := os.Readlink(next)
+	target, err := winapi.Readlink(next)
 	if err != nil {
 		if junction {
 			return "", false, otherReparse(opResolve, next, err)

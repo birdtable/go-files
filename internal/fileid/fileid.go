@@ -4,7 +4,9 @@
 // not fit the 64 bits read), makes os.SameFile call any two files the same, so a reader of a path
 // cannot see one swapped in at the name. write, confine, lock, appdirs, treesum and trust share this
 // one refusal rather than each trust the compare. On Unix every file has
-// an inode os.SameFile can trust, so Indexed never refuses there.
+// an inode os.SameFile can trust, so Indexed never refuses there. It holds too the one rule trust,
+// confine and appdirs share for a path that names no file at all, DevicePath: a Windows device or
+// pipe name, which no file index can be read for, refused before it is opened.
 // It imports the standard library alone, syscall reading the Windows index.
 package fileid
 

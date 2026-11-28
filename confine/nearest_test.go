@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/birdtable/go-files/confine"
 )
@@ -165,5 +166,61 @@ func TestNearestAsksEachFolderUpToTheVolumesTopInOrder(t *testing.T) {
 	}
 	if len(want) < 4 {
 		t.Fatalf("the walk from %s has %d folders", start, len(want))
+	}
+}
+
+// typed is an fs.FileInfo of one name with the mode given, for a look a test answers itself.
+type typed struct {
+	name string
+	mode fs.FileMode
+}
+
+func (f typed) Name() string       { return f.name }
+func (f typed) Size() int64        { return 0 }
+func (f typed) Mode() fs.FileMode  { return f.mode }
+func (f typed) ModTime() time.Time { return time.Time{} }
+func (f typed) IsDir() bool        { return f.mode.IsDir() }
+func (f typed) Sys() any           { return nil }
+
+// A marker that is a pipe, a device, a character device or a socket is no file or folder: Nearest
+// refuses it where the look finds it, matching fs.ErrInvalid and naming it, and asks no folder
+// above. A file, a folder and a link at the marker are each answered as the folder that holds it.
+//
+// What it costs when this fails: a pipe or a device another account put where a marker is looked
+// for is taken for the marker, and its folder for the project's root.
+func TestNearestRefusesAMarkerThatIsAPipeADeviceOrASocket(t *testing.T) {
+	t.Parallel()
+	tmp, start := nearestTree(t)
+	b := filepath.Join(tmp, "a", "b")
+	at := filepath.Join(b, "mark")
+	for _, c := range []struct {
+		mode    fs.FileMode
+		refused bool
+	}{
+		{fs.ModeNamedPipe, true},
+		{fs.ModeDevice, true},
+		{fs.ModeDevice | fs.ModeCharDevice, true},
+		{fs.ModeSocket, true},
+		{0, false},
+		{fs.ModeDir, false},
+		{fs.ModeSymlink, false},
+	} {
+		var asked []string
+		got, err := confine.NearestLooked(start, "mark", "", func(p string) (fs.FileInfo, error) {
+			asked = append(asked, p)
+			if p == at {
+				return typed{"mark", c.mode}, nil
+			}
+			return nil, &fs.PathError{Op: "lstat", Path: p, Err: fs.ErrNotExist}
+		})
+		var pe *fs.PathError
+		switch {
+		case !c.refused && (err != nil || got != b):
+			t.Errorf("a marker of mode %v at %s: %q, %v, and want %s", c.mode, at, got, err, b)
+		case c.refused && (!errors.Is(err, fs.ErrInvalid) || !errors.As(err, &pe) || pe.Path != at || got != ""):
+			t.Errorf("a marker of mode %v at %s: %q, %v, and want a refusal matching fs.ErrInvalid naming it", c.mode, at, got, err)
+		case c.refused && slices.Contains(asked, filepath.Join(tmp, "a", "mark")):
+			t.Errorf("a marker of mode %v at %s: the walk asked a folder above it, %v", c.mode, at, asked)
+		}
 	}
 }

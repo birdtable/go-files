@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/birdtable/go-files/internal/fileid"
 )
 
 const opResolve = "resolve"
@@ -53,18 +55,21 @@ var ErrLoop = fmt.Errorf("the path passes more than %d links, as a loop of links
 // up from a folder that is not there, and a name before the last that is not a folder is an
 // *fs.PathError holding syscall.ENOTDIR.
 //
-// Once the walk ends, the system's own os.Stat of path must find the file os.Stat finds at the
-// answer, or the path is refused as changed, with ErrChanged, which matches ErrOutside: where the
-// answer exists, a link swapped during the walk, or a system that follows a link otherwise than
-// the walk, is never answered. Where the answer has a missing name, the system's os.Stat of path
-// must find nothing too, or it is refused with ErrChanged, a name made there by another process
+// Once the walk ends, the system's own look at path (os.Stat, and on Windows an open of its own that
+// asks for identification alone, so a pipe a link leads to learns who the caller is and acts as
+// it in nothing) must find the file it finds at the answer, or the path is refused as changed,
+// with ErrChanged, which matches ErrOutside: where the answer exists, a link swapped during the
+// walk, or a system that follows a link otherwise than the walk, is never answered. Where the
+// answer has a missing name, the system's look at path must find nothing too, or it is refused with ErrChanged, a name made there by another process
 // while the path was walked among them, and that is all that is checked: the missing tail is
 // where the walk leads, not where the system would make a file, and the two differ for a link the walk reads otherwise than the
 // system follows it, as a /proc link of a process in another mount namespace, or on Windows a
 // symbolic link to an NT name with no drive (\Device\...).
 //
 // It refuses, with an *fs.PathError matching ErrOutside: a path that is not absolute (fs.ErrInvalid
-// too), more than 32 links (ErrLoop), and on Windows a target on a drive with no
+// too), on Windows a path that names a device or a pipe, not a path on a drive or a volume (\\.\,
+// or \\?\ or \??\ naming neither a drive nor a Volume{GUID}), before anything is opened
+// (fs.ErrInvalid too), more than 32 links (ErrLoop), and on Windows a target on a drive with no
 // root (C:x), which leads to the drive's working folder, an absolute target with a . or a ..
 // among its names, a target with a name that ends in a dot or a space, which the system strips, a
 // junction whose target is not absolute, a device path (\\.\), a target past \\?\ that is not a
@@ -91,7 +96,13 @@ func Below(folder, path string) (string, error) {
 	if err := absClean(folder); err != nil {
 		return "", err
 	}
-	want, err := os.Stat(folder)
+	if err := notDevice(opResolve, folder); err != nil {
+		return "", err
+	}
+	if _, err := absTaken(path); err != nil {
+		return "", err
+	}
+	want, err := sysStat(folder)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +118,7 @@ func Below(folder, path string) (string, error) {
 	}
 	top := topOf(done)
 	for p := done; ; p = up(p, top) {
-		got, err := os.Stat(p)
+		got, err := sysStat(p)
 		if err != nil {
 			return "", err
 		}
@@ -131,13 +142,19 @@ func Below(folder, path string) (string, error) {
 // runs between the two, so a test of this package swaps a link there. Where the walk found nothing
 // at its end, any answer of the system's but fs.ErrNotExist is refused as changed.
 func resolveChecked(path string, walked func()) (string, []string, error) {
-	done, rest, err := resolve(path)
+	return resolveSwapped(path, func(string) {}, walked)
+}
+
+// resolveSwapped is resolveChecked with looking run before each of the walk's looks, with the
+// name it looks at, so a test of this package changes a folder the walk has passed.
+func resolveSwapped(path string, looking func(string), walked func()) (string, []string, error) {
+	done, rest, err := resolveWalk(path, looking)
 	if err != nil {
 		return "", nil, err
 	}
 	walked()
 	changed := &fs.PathError{Op: opResolve, Path: path, Err: fmt.Errorf("%w: the system's own look at it found another file than the walk", ErrChanged)}
-	sys, sysErr := os.Stat(path)
+	sys, sysErr := sysStat(path)
 	if len(rest) > 0 {
 		if sysErr == nil {
 			return "", nil, changed
@@ -147,7 +164,7 @@ func resolveChecked(path string, walked func()) (string, []string, error) {
 		}
 		return done, rest, nil
 	}
-	got, err := os.Stat(done)
+	got, err := sysStat(done)
 	if errors.Is(sysErr, fs.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
 		return "", nil, changed
 	}
@@ -166,8 +183,6 @@ func resolveChecked(path string, walked func()) (string, []string, error) {
 	return done, nil, nil
 }
 
-// resolve walks path one name at a time and answers the part that exists, with no link left in
-// it, and the names below it that do not exist, in order.
 // movedResolve is a refusal when a folder on the walk is not the one looked at when its file index is
 // read, so a link changed under the walk between the look and the read; it matches ErrChanged.
 func movedResolve(path string) error {
@@ -179,10 +194,18 @@ func absTaken(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", &fs.PathError{Op: opResolve, Path: path, Err: fmt.Errorf("it is not an absolute path: %w", errors.Join(fs.ErrInvalid, ErrOutside))}
 	}
+	if err := notDevice(opResolve, path); err != nil {
+		return "", err
+	}
 	return asTaken(path)
 }
 
-func resolve(path string) (string, []string, error) {
+// resolve walks path one name at a time and answers the part that exists, with no link left in
+// it, and the names below it that do not exist, in order.
+func resolve(path string) (string, []string, error) { return resolveWalk(path, func(string) {}) }
+
+// resolveWalk is resolve, with looking run before each look, with the name it looks at.
+func resolveWalk(path string, looking func(string)) (string, []string, error) {
 	taken, err := absTaken(path)
 	if err != nil {
 		return "", nil, err
@@ -198,7 +221,8 @@ func resolve(path string) (string, []string, error) {
 			continue
 		}
 		next := child(done, name)
-		fi, err := os.Lstat(next)
+		looking(next)
+		fi, err := sysLstat(next)
 		if errors.Is(err, fs.ErrNotExist) {
 			return notThere(done, next, append([]string{name}, todo...))
 		}
@@ -278,6 +302,18 @@ func hop(done, next, target string, todo []string) (string, []string, error) {
 func absClean(path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return &fs.PathError{Op: opResolve, Path: path, Err: fmt.Errorf("it is not an absolute, clean path: %w", errors.Join(fs.ErrInvalid, ErrOutside))}
+	}
+	return nil
+}
+
+// notDevice refuses path, under op, where Windows reads it as a device or a pipe, not a path on a
+// drive or a volume: a \\.\ path, or a \\?\ one that names neither a drive nor a Volume{GUID}, as
+// fileid.DevicePath reads it, before anything opens it, with an *fs.PathError matching
+// fs.ErrInvalid and ErrOutside. A UNC path is not refused: it names a share, which an open connects
+// to, authenticating the caller to its host. Elsewhere it refuses nothing.
+func notDevice(op, path string) error {
+	if fileid.DevicePath(path) {
+		return &fs.PathError{Op: op, Path: path, Err: fmt.Errorf("it names a device or a pipe, not a path on a drive or a volume: %w", errors.Join(fs.ErrInvalid, ErrOutside))}
 	}
 	return nil
 }

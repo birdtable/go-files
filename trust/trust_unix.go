@@ -118,3 +118,10 @@ func ownerOf(f *os.File) (string, error) {
 // bySpelling is false: a .. in a link's target, or after a link, goes up from the folder the walk
 // reached through the link, so no path is cleaned before its links are read.
 const bySpelling = false
+
+// nameThere is whether the one name path is there, read by lstat: nil where it is, an error
+// matching fs.ErrNotExist where it is not.
+func nameThere(path string) error {
+	_, err := os.Lstat(path)
+	return err
+}

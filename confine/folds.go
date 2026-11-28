@@ -74,13 +74,18 @@ var ErrNoFolding = fmt.Errorf("the system cannot say how this folder reads names
 // Any other volume, network shares, FUSE, FAT on macOS and Linux, XFS (which can be made to fold
 // ASCII case) and ZFS among them, and any other system, is FoldUnknown with an error matching
 // ErrNoFolding. A failure to ask is FoldUnknown with the system's error, and root that is not a
-// folder is FoldUnknown with an *fs.PathError matching fs.ErrInvalid. Treat FoldUnknown as FoldBoth,
+// folder is FoldUnknown with an *fs.PathError matching fs.ErrInvalid. On Windows a root that names
+// a device or a pipe, not a path on a drive or a volume, is FoldUnknown with an *fs.PathError
+// matching fs.ErrInvalid and ErrOutside, before anything is opened. Treat FoldUnknown as FoldBoth,
 // as its bits do: two names that might be one are never reported apart.
 //
 // The answer is the folder's rule now: a folder another account may change, as by chattr +F on an
 // empty one, may answer otherwise later. Collide asks by a probe, for a caller that wants a definite
 // answer and may write.
 func Folds(root string) (Folding, error) {
+	if err := notDevice(opFolds, root); err != nil {
+		return FoldUnknown, err
+	}
 	f, err := openFolder(root)
 	if err != nil {
 		return FoldUnknown, err
@@ -94,7 +99,7 @@ func Folds(root string) (Folding, error) {
 
 // openFolder opens root read-only, never waiting on a pipe, and refuses what is not a folder.
 func openFolder(root string) (*os.File, error) {
-	f, err := os.OpenFile(root, os.O_RDONLY|noWait, 0) //nolint:gosec // G304: Folds reads the folder its caller names, and asks this descriptor
+	f, err := openFolderPath(root)
 	if err != nil {
 		return nil, err
 	}

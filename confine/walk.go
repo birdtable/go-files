@@ -119,8 +119,12 @@ func swappedAt(cur *os.Root, err error) bool {
 // walkOpen is Open by the walk. A file the walk found is opened in the folder it holds and refused
 // unless it is that file. A missing one is made by an exclusive create there and refused unless a
 // second walk finds it; when another process made it first, and the caller did not ask for
-// os.O_EXCL, it is walked again and that one opened.
+// os.O_EXCL, it is walked again and that one opened. A root on Windows' pipes is refused
+// first, as rootOnPipes says.
 func walkOpen(root *os.Root, name string, flag int, perm fs.FileMode, reached func(step string)) (*os.File, error) {
+	if err := rootOnPipes(root, name); err != nil {
+		return nil, err
+	}
 	w, err := walkTo(root, name, reached)
 	if err != nil {
 		return nil, err

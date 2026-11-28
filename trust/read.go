@@ -49,6 +49,9 @@ func readOwned(path, owner string, private bool, limit int, h host, opened func(
 	if !ownerForm.MatchString(owner) {
 		return nil, refuse(path, fmt.Sprintf("%s: %q is not an owner, as uid:1000 or a SID", path, owner), Fix{}, nil)
 	}
+	if err := device(path); err != nil {
+		return nil, err
+	}
 	if err := mountEntries(h.mounts.Mounts, h.mounts.FileSystems, h); err != nil {
 		return nil, err
 	}

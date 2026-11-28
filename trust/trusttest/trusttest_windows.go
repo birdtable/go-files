@@ -18,6 +18,26 @@ const (
 	everyone = "S-1-1-0"
 )
 
+// identify is SECURITY_SQOS_PRESENT with SECURITY_IDENTIFICATION, internal/winapi's Identify, which
+// trusttest may not import: where an open lands on a named pipe, its server may learn who the
+// caller is and act as it in nothing.
+const identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IDENTIFICATION
+
+// createFile is windows.CreateFile with identify added to flags, trusttest's one CreateFile.
+func createFile(name *uint16, access, share, disposition, flags uint32, template windows.Handle) (windows.Handle, error) {
+	return windows.CreateFile(name, access, share, nil, disposition, flags|identify, template)
+}
+
+// identifyOnly is the SECURITY_QUALITY_OF_SERVICE reopen gives NtCreateFile: identification, with
+// static tracking, as internal/winapi's OpenAt gives it.
+func identifyOnly() *windows.SECURITY_QUALITY_OF_SERVICE {
+	return &windows.SECURITY_QUALITY_OF_SERVICE{
+		Length:              uint32(unsafe.Sizeof(windows.SECURITY_QUALITY_OF_SERVICE{})),
+		ImpersonationLevel:  windows.SecurityIdentification,
+		ContextTrackingMode: windows.SECURITY_STATIC_TRACKING,
+	}
+}
+
 // entry is the allow entry that lets who in: Users or Everyone, with the rights to read or to
 // write a file, on the name alone.
 func entry(who Who) (windows.EXPLICIT_ACCESS, error) {
@@ -139,7 +159,7 @@ func reopen(path string) (windows.Handle, error) {
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
-	dir, err := windows.CreateFile(d, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+	dir, err := createFile(d, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: filepath.Dir(abs), Err: err}
@@ -149,7 +169,7 @@ func reopen(path string) (windows.Handle, error) {
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
-	attrs := windows.OBJECT_ATTRIBUTES{Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: dir, ObjectName: name, Attributes: windows.OBJ_CASE_INSENSITIVE}
+	attrs := windows.OBJECT_ATTRIBUTES{Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: dir, ObjectName: name, Attributes: windows.OBJ_CASE_INSENSITIVE, SecurityQoS: identifyOnly()}
 	var h windows.Handle
 	if err := windows.NtCreateFile(&h, windows.READ_CONTROL|windows.WRITE_DAC, &attrs, &windows.IO_STATUS_BLOCK{}, nil, 0,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN, windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0); err != nil {
@@ -208,7 +228,7 @@ func open(path string, access uint32) (windows.Handle, error) {
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
-	h, err := windows.CreateFile(p, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+	h, err := createFile(p, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return 0, &fs.PathError{Op: "open", Path: path, Err: err}
