@@ -4,10 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"unicode/utf16"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -31,22 +34,76 @@ func pipeServer(t *testing.T) (path, name string, server windows.Handle) {
 	return path, name, server
 }
 
-// clientUser is the name of the account at the client end of server, as GetNamedPipeHandleState
-// reads it, which it can do only where the client let the server impersonate it.
-func clientUser(server windows.Handle) (string, error) {
-	buf := make([]uint16, 512)
-	err := windows.GetNamedPipeHandleState(server, nil, nil, nil, nil, &buf[0], uint32(len(buf)))
-	return windows.UTF16ToString(buf), err
+// fsctlPipeImpersonate is FSCTL_PIPE_IMPERSONATE, which x/sys does not name: the control
+// ImpersonateNamedPipeClient sends, sent here by DeviceIoControl, as the register lets no file load
+// that proc.
+const fsctlPipeImpersonate = 0x11001C
+
+// clientLevel is the level at which server's thread takes on the token of the client at its end:
+// the thread token's TokenImpersonationLevel after FSCTL_PIPE_IMPERSONATE, opened as the process,
+// as a token at identification opens to nothing else, and then reverted. The system answers
+// ERROR_CANNOT_IMPERSONATE until the server has read data the client wrote. A thread that cannot
+// revert stays locked, so the scheduler ends it rather than hand it on.
+func clientLevel(server windows.Handle) (level uint32, err error) {
+	runtime.LockOSThread()
+	var n uint32
+	if err := windows.DeviceIoControl(server, fsctlPipeImpersonate, nil, 0, nil, 0, &n, nil); err != nil {
+		runtime.UnlockOSThread()
+		return 0, err
+	}
+	var tok windows.Token
+	err = windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &tok)
+	if err == nil {
+		err = windows.GetTokenInformation(tok, windows.TokenImpersonationLevel, (*byte)(unsafe.Pointer(&level)), uint32(unsafe.Sizeof(level)), &n) //nolint:gosec // G103: the pointer is to level, a SECURITY_IMPERSONATION_LEVEL, for the one call
+		err = errors.Join(err, tok.Close())
+	}
+	if rerr := windows.RevertToSelf(); rerr != nil {
+		return 0, errors.Join(err, fmt.Errorf("the server's thread could not revert, and stays locked: %w", rerr))
+	}
+	runtime.UnlockOSThread()
+	return level, err
+}
+
+// levelAfterAByte has client write a byte, server read it, and answers clientLevel.
+func levelAfterAByte(t *testing.T, client, server windows.Handle) (uint32, error) {
+	t.Helper()
+	var n uint32
+	if err := windows.WriteFile(client, []byte{1}, &n, nil); err != nil {
+		t.Fatalf("the client's write: %v", err)
+	}
+	if err := windows.ReadFile(server, make([]byte, 1), &n, nil); err != nil || n != 1 {
+		t.Fatalf("the server's read: %d bytes, %v", n, err)
+	}
+	return clientLevel(server)
+}
+
+// levels names a SECURITY_IMPERSONATION_LEVEL for a message.
+func levels(level uint32) string {
+	switch level {
+	case windows.SecurityAnonymous:
+		return "SecurityAnonymous"
+	case windows.SecurityIdentification:
+		return "SecurityIdentification"
+	case windows.SecurityImpersonation:
+		return "SecurityImpersonation"
+	case windows.SecurityDelegation:
+		return "SecurityDelegation"
+	}
+	return fmt.Sprint("level ", level)
 }
 
 // An open of a named pipe gives its server the client's token at the level the open asks for, and
 // with no quality of service asked, as Go's own opens and os.Stat's ask none, at impersonation: a
 // server holding SeImpersonatePrivilege may act as the client. Each open of go-files asks for
 // identification, at which the server learns who the client is and may act as it in nothing:
-// winapi.CreateFile, OpenPath and OpenAt. Two controls show the server can see impersonation where
-// it is given: a windows.CreateFile with no quality of service, and the open os.Stat makes, for the
-// attributes alone with its reparse point not followed. Each client end is shown connected before
-// the server asks, so a refusal is the level's, not a client gone.
+// winapi.CreateFile, OpenPath and OpenAt. Each client that may write writes a byte the server reads,
+// and the server then reads the level of the token it takes on: SecurityIdentification for
+// winapi.CreateFile and OpenAt, and SecurityImpersonation for the control, a windows.CreateFile with
+// no quality of service, so the test is seen to tell the two apart. An open for the attributes
+// alone, as OpenPath's and os.Stat's are, can write nothing, and the system lets a server take on
+// no token from a client that sent it nothing: those are shown refused, ERROR_CANNOT_IMPERSONATE,
+// whatever level they asked, their level being winapi.CreateFile's, read above. Each client end is
+// shown connected before the server asks, so a refusal is the level's, not a client gone.
 //
 // What it costs when this fails: a path that leads to a pipe, by a link or a junction a less-trusted
 // account planted, lets that pipe's server act as the program that opened it, with every right the
@@ -91,23 +148,20 @@ func TestAPipeServerMayActAsTheClientOfNoOpenOfGoFiles(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		open   func(t *testing.T, path, name string) windows.Handle
-		writes bool // whether the client writes a byte, which the server reads before it asks
-		acts   bool // whether the server may act as the client
+		writes bool   // whether the client writes a byte, which the server reads before it asks
+		want   uint32 // the level a client that writes gives the server
 	}{
 		{"windows.CreateFile with no quality of service, the control", byPath(func(p *uint16) (windows.Handle, error) {
 			return windows.CreateFile(p, rw, 0, nil, windows.OPEN_EXISTING, 0, 0)
-		}), true, true},
-		{"os.Stat's open for the attributes alone, the control", byPath(func(p *uint16) (windows.Handle, error) {
-			return windows.CreateFile(p, 0, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
-		}), false, true},
+		}), true, windows.SecurityImpersonation},
 		{"CreateFile", byPath(func(p *uint16) (windows.Handle, error) {
 			return CreateFile(p, rw, 0, windows.OPEN_EXISTING, 0)
-		}), true, false},
+		}), true, windows.SecurityIdentification},
 		{"CreateFile for the attributes alone", byPath(func(p *uint16) (windows.Handle, error) {
 			return CreateFile(p, windows.FILE_READ_ATTRIBUTES, 0, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
-		}), false, false},
-		{"OpenPath", openPath(true), false, false},
-		{"OpenPath with no link followed", openPath(false), false, false},
+		}), false, 0},
+		{"OpenPath", openPath(true), false, 0},
+		{"OpenPath with no link followed", openPath(false), false, 0},
 		{"OpenAt", func(t *testing.T, _, name string) windows.Handle {
 			t.Helper()
 			root, err := windows.UTF16PtrFromString(`\\.\pipe\`)
@@ -124,7 +178,7 @@ func TestAPipeServerMayActAsTheClientOfNoOpenOfGoFiles(t *testing.T) {
 				t.Fatalf("OpenAt %s: %v", name, err)
 			}
 			return h
-		}, true, false},
+		}, true, windows.SecurityIdentification},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -134,24 +188,24 @@ func TestAPipeServerMayActAsTheClientOfNoOpenOfGoFiles(t *testing.T) {
 			if err := windows.ConnectNamedPipe(server, nil); !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
 				t.Fatalf("the client end is not connected: ConnectNamedPipe answered %v, not ERROR_PIPE_CONNECTED", err)
 			}
-			if c.writes {
-				var n uint32
-				if err := windows.WriteFile(client, []byte{1}, &n, nil); err != nil {
-					t.Fatalf("the client's write: %v", err)
+			if !c.writes {
+				level, err := clientLevel(server)
+				if !errors.Is(err, windows.ERROR_CANNOT_IMPERSONATE) {
+					t.Fatalf("the server took on the token of a client that wrote nothing: %s, %v, and want ERROR_CANNOT_IMPERSONATE", levels(level), err)
 				}
-				if err := windows.ReadFile(server, make([]byte, 1), &n, nil); err != nil || n != 1 {
-					t.Fatalf("the server's read: %d bytes, %v", n, err)
-				}
+				t.Logf("native: the server takes on no token from a client that wrote nothing: %v", err)
+				return
 			}
-			user, err := clientUser(server)
+			level, err := levelAfterAByte(t, client, server)
 			switch {
-			case c.acts && (err != nil || user == ""):
-				t.Fatalf("the control: the server could not impersonate a client that asked for no level (%q, %v), so this test cannot see the level", user, err)
-			case !c.acts && err == nil:
-				t.Fatalf("the server impersonated the client and read its account, %q: the open asked for more than identification", user)
-			case !c.acts:
-				t.Logf("the server cannot impersonate the client: %v", err)
+			case err != nil && c.want == windows.SecurityImpersonation:
+				t.Fatalf("the control: the server took on no token of a client that asked for no level (%v), so this test cannot see the level", err)
+			case err != nil:
+				t.Fatalf("the server took on no token of the client (%v), so this test cannot see the level it gives", err)
+			case level != c.want:
+				t.Fatalf("the server took on the client's token at %s, and want %s", levels(level), levels(c.want))
 			}
+			t.Logf("native: the server took on the client's token at %s", levels(level))
 		})
 	}
 }
@@ -189,10 +243,12 @@ func plantJunction(link, sub string) error {
 
 // A junction any account may plant can name a pipe, \Device\NamedPipe\<name> or \??\pipe\<name>,
 // or the pipes' own folder, with the pipe's name below it in the path. Where the system follows
-// one to the pipe, as the open os.Stat makes when it follows a name does (the control, run first
-// for each), OpenPath, which Stat, Lstat and the opens of confine and appdirs that follow a path
-// are, reaches it at identification alone: the pipe's server learns who the caller is, and may act
-// as it in nothing. Where the system follows none, the control says so and nothing else is asked.
+// one to the pipe, as an open with no quality of service does (the control, run first for each,
+// whose server takes on the caller's token at SecurityImpersonation once it reads a byte), an open
+// by winapi.CreateFile through it gives the server SecurityIdentification alone, and OpenPath, which
+// Stat, Lstat and the opens of confine and appdirs that follow a path are, reaches it for the
+// attributes alone, writing nothing, so its server takes on no token at all. Where the system
+// follows none, the control says so and nothing else is asked.
 //
 // What it costs when this fails: a junction a less-trusted account planted in a folder the program
 // walks gives that account's pipe server the program's token to act with.
@@ -230,21 +286,35 @@ func TestAJunctionToAPipeLetsItsServerActAsNoOpenPath(t *testing.T) {
 				}
 				return server, h, true
 			}
-			server, _, ok := reach(t, "control", func(path string) (windows.Handle, error) {
+			rw := uint32(windows.GENERIC_READ | windows.GENERIC_WRITE)
+			server, client, ok := reach(t, "control", func(path string) (windows.Handle, error) {
 				p, err := windows.UTF16PtrFromString(path)
 				if err != nil {
 					return 0, err
 				}
-				return windows.CreateFile(p, 0, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+				return windows.CreateFile(p, rw, 0, nil, windows.OPEN_EXISTING, 0, 0)
 			})
 			if !ok {
 				t.Logf("native: the system follows no junction %s to a pipe, so no open through one reaches it", c.name)
 				return
 			}
-			if user, err := clientUser(server); err != nil || user == "" {
-				t.Fatalf("the control: the server could not impersonate a client that asked for no level (%q, %v), so this test cannot see the level", user, err)
+			if level, err := levelAfterAByte(t, client, server); err != nil || level != windows.SecurityImpersonation {
+				t.Fatalf("the control: the server took on the token of a client that asked for no level at %s, %v, and want SecurityImpersonation, so this test cannot see the level", levels(level), err)
 			}
-			t.Logf("native: os.Stat's open follows the junction %s to the pipe, and its server may act as the caller", c.name)
+			t.Logf("native: an open with no quality of service follows the junction %s to the pipe, and its server may act as the caller", c.name)
+			server, client, ok = reach(t, "createfile", func(path string) (windows.Handle, error) {
+				p, err := windows.UTF16PtrFromString(path)
+				if err != nil {
+					return 0, err
+				}
+				return CreateFile(p, rw, 0, windows.OPEN_EXISTING, 0)
+			})
+			if !ok {
+				t.Fatalf("CreateFile reached no pipe through the junction %s where the control's open did, so this test cannot see its level", c.name)
+			}
+			if level, err := levelAfterAByte(t, client, server); err != nil || level != windows.SecurityIdentification {
+				t.Fatalf("CreateFile through the junction %s gave the pipe's server the caller's token at %s, %v, and want SecurityIdentification", c.name, levels(level), err)
+			}
 			server, _, ok = reach(t, "openpath", func(path string) (windows.Handle, error) {
 				f, err := OpenPath(path, true)
 				if err != nil {
@@ -260,8 +330,8 @@ func TestAJunctionToAPipeLetsItsServerActAsNoOpenPath(t *testing.T) {
 			if !ok {
 				t.Fatalf("OpenPath reached no pipe through the junction %s where the control's open did, so this test cannot see its level", c.name)
 			}
-			if user, err := clientUser(server); err == nil {
-				t.Fatalf("OpenPath through the junction %s let the pipe's server impersonate the caller and read its account, %q", c.name, user)
+			if level, err := clientLevel(server); !errors.Is(err, windows.ERROR_CANNOT_IMPERSONATE) {
+				t.Fatalf("OpenPath through the junction %s gave the pipe's server the caller's token at %s, %v, and want ERROR_CANNOT_IMPERSONATE, as it writes nothing", c.name, levels(level), err)
 			}
 		})
 	}
