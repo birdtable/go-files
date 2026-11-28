@@ -282,6 +282,7 @@ tasks:
           internal/winapi/p.go winapi $kit layer-winapi
           internal/winapi/p_test.go winapi $mod/lib layer-winapi-tests
           internal/testtoken/p.go testtoken $mod/lib layer-testtoken
+          internal/imagetest/p.go imagetest $mod/lib layer-imagetest
           internal/secondconsumer/p_test.go secondconsumer $mod/lib layer-second-consumer
           p_test.go gofiles_test $mod/lib layer-no-row
           gate/p.go gate golang.org/x/sys/cpu layer-no-row

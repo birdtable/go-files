@@ -102,7 +102,7 @@ linters:
         # arch.ports.23: operating-system packages only in the host layer.
         os-host:
           # slot os-host begin
-          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/testtoken/**", "!**/internal/loghold/*_windows.go"]
+          files: ["$all", "!**/write/**", "!**/confine/**", "!**/trust/**", "!**/lock/**", "!**/appdirs/**", "!**/treesum/**", "!**/internal/winapi/**", "!**/internal/testtoken/**", "!**/internal/imagetest/**", "!**/internal/loghold/*_windows.go"]
           # go-files: each package is its own host layer; the layer rows below name what each may import
           # slot os-host end
           deny:
@@ -259,7 +259,7 @@ linters:
         layer-trust-tests:
           files: ["**/trust/*_test.go"]
           list-mode: strict
-          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/internal/fileid$]
+          allow: [$gostd, golang.org/x/sys, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/internal/testtoken$, github.com/birdtable/go-testkit$, github.com/birdtable/go-files/internal/fileid$, github.com/birdtable/go-files/internal/imagetest$]
         # trusttest, the test helpers of a program that judges with trust, takes
         # trust and golang.org/x/sys, as appdirs does; its tests take it, internal/testtoken and testkit besides.
         layer-trusttest:
@@ -316,6 +316,12 @@ linters:
           files: ["**/internal/testtoken/*.go"]
           list-mode: strict
           allow: [$gostd, golang.org/x/sys]
+        # internal/imagetest, the macOS image cleanup trust's and confine's tests share, is the
+        # tests' alone, and takes golang.org/x/sys for getfsstat and the kqueue on the mount table.
+        layer-imagetest:
+          files: ["**/internal/imagetest/*.go"]
+          list-mode: strict
+          allow: [$gostd, golang.org/x/sys]
         # The second consumer takes the six packages as any program does, and no
         # library beside them; its tests take filestest besides.
         layer-second-consumer:
@@ -323,7 +329,7 @@ linters:
           list-mode: strict
           allow: [$gostd, github.com/birdtable/go-files/write$, github.com/birdtable/go-files/lock$, github.com/birdtable/go-files/confine$, github.com/birdtable/go-files/trust$, github.com/birdtable/go-files/appdirs$, github.com/birdtable/go-files/treesum$, github.com/birdtable/go-files/filestest$]
         layer-no-row:
-          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/loghold/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/testtoken/*.go", "!**/internal/secondconsumer/*.go"]
+          files: ["$all", "!**/trust/*.go", "!**/confine/*.go", "!**/write/*.go", "!**/treesum/*.go", "!**/nowait/*.go", "!**/splice/*.go", "!**/lock/*.go", "!**/appdirs/*.go", "!**/trust/trusttest/*.go", "!**/filestest/*.go", "!**/internal/fileid/*.go", "!**/internal/loghold/*.go", "!**/internal/cmd/measure/*.go", "!**/internal/winapi/*.go", "!**/internal/testtoken/*.go", "!**/internal/imagetest/*.go", "!**/internal/secondconsumer/*.go"]
           list-mode: strict
           allow: [$gostd]
         # slot layer-rows end
