@@ -66,6 +66,13 @@ jobs:
           for modfile in tools/*.mod; do
             [ -f "$modfile" ] || continue
             found=$((found + 1))
+            # hatch.mod names a module of its own: tidied alone, as the go.mod of an empty folder, so a
+            # package the tree adds is not looked for in the published go-files it requires
+            if [ "$modfile" = tools/hatch.mod ]; then
+              work=$(mktemp -d)
+              cp tools/hatch.mod "$work/go.mod" && cp tools/hatch.sum "$work/go.sum" && go -C "$work" mod tidy -diff || { echo "not tidy, tidied alone: $modfile" >&2; status=1; }
+              continue
+            fi
             go mod tidy -diff -modfile="$modfile" || { echo "not tidy: $modfile" >&2; status=1; }
           done
           if [ "$found" -eq 0 ]; then
