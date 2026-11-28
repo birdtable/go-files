@@ -21,8 +21,8 @@ var errFinalLinks = fmt.Errorf("it has more than one name, a hard link, and macO
 // where a folder may have one, as a Time Machine disk's folders do, a network share, a FUSE volume,
 // or a type not listed, F_GETPATH may name a folder, and all beneath it, by whichever of its names
 // any process looked at last; msdos and exfat answer the spelling a name was first looked up by
-// since it entered the cache, not the stored one, and a FAT image, bytes any account may write and
-// attach, may give a folder two names.
+// since it entered the cache, not the stored one. APFS keeps its promises as the system writes it;
+// a volume whose bytes another account wrote is judged with trust.Path first, as Final's doc says.
 func finalType(t string) bool {
 	return t == "apfs"
 }

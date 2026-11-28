@@ -43,11 +43,13 @@ const opFinal = "final"
 // beneath it, a volume mounted there too, answers by whichever of the folder's names was looked at
 // last, and HFS+'s count of a folder's names counts its entries, so it cannot tell; a network or
 // FUSE volume's server decides what is one folder. On msdos and exfat F_GETPATH answers the
-// spelling a name was first looked up by since it entered the cache, not the stored one, and a FAT
-// image, bytes any account may write and attach, may give a folder two names. So on macOS a name
-// is a key only on APFS: Final answers only where the opened file's volume and the volume of every
-// folder of the answer up to / are apfs (fstatfs's type name), and refuses a name on another
-// volume, msdos and exfat too, or beneath one, matching errors.ErrUnsupported. There, a file,
+// spelling a name was first looked up by since it entered the cache, not the stored one. So on
+// macOS Final answers only on APFS, which keeps one spelling and, as the system writes it, gives a
+// folder no second name: only where the opened file's volume and the volume of every folder of the
+// answer up to / are apfs (fstatfs's type name), and it refuses a name on another volume, msdos
+// and exfat too, or beneath one, matching errors.ErrUnsupported. No type closes a volume whose
+// bytes another account wrote and attached, a disk image or a removable disk, which may give a
+// folder two names on APFS too: a caller judges such a volume with trust.Path first. There, a file,
 // not a folder, with more than one name, as APFS gives one, is refused, matching
 // errors.ErrUnsupported: its count of names is read from the open file after the name, and again
 // from the answer's name after that, and a count above one either time refuses it, so a second
