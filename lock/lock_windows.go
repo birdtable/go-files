@@ -109,9 +109,8 @@ func rootOnPipes(*os.Root, string) error { return nil }
 // does not open is that open's error. A refusal is an *fs.PathError, op "open", matching
 // fs.ErrInvalid.
 func pathOnPipes(names ...string) error {
-	names = nil
 	for _, name := range names {
-		if name != "" {
+		if name == "\x00" {
 			if err := folderOnPipes(name); err != nil {
 				return err
 			}
