@@ -427,7 +427,8 @@ linters:
         # read (GetProcAddress, GetProcAddressByOrdinal). A proc reached by name,
         # as NewLazySystemDLL("kernel32.dll").NewProc("LockFileEx").Call(...),
         # would get past the path-lock row, which names x/sys's wrapper. go-files
-        # excepts no proc, so no exclusion scopes these. An address alone has no
+        # excepts one proc, on one line of one test, by the exclusion of the
+        # level tests' line in the overrides below. An address alone has no
         # caller while the raw-call row above holds; it is refused as well, so
         # these rows read as go-socket's.
         - pattern: ^(syscall|windows)\.(NewLazyDLL|NewLazySystemDLL|LoadDLL|MustLoadDLL|LoadLibrary|LoadLibraryEx|GetProcAddress|GetProcAddressByOrdinal)$
@@ -697,6 +698,17 @@ linters:
         linters: [forbidigo]
         text: "register: no raw system call"
         source: '^\t_, _, e := unix\.Syscall6\(unix\.SYS_GETATTRLIST, '
+      # The DLL-proc row holds outside one line of one test: internal/winapi's
+      # level tests take on a pipe client's token by ImpersonateNamedPipeClient,
+      # which x/sys does not wrap and DeviceIoControl cannot stand in for, to
+      # read the level go-files' opens give a pipe's server. By file, a test
+      # Windows alone builds, and by the line that acquires that proc alone: a
+      # second proc, a DLL loaded on any other line, or the same line in another
+      # file is red. When x/sys wraps it, the line and this exclusion go.
+      - path: ^internal/winapi/client_windows_test\.go$
+        linters: [forbidigo]
+        text: "register: no DLL's proc is acquired"
+        source: '^\timpersonate := windows\.NewLazySystemDLL\("advapi32\.dll"\)\.NewProc\("ImpersonateNamedPipeClient"\)$'
       # Here reads the environment
       # of the account that runs it, which For takes as an argument, so a
       # program needs no OS knowledge to find its folders. By file, at the

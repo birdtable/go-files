@@ -34,23 +34,23 @@ func pipeServer(t *testing.T) (path, name string, server windows.Handle) {
 	return path, name, server
 }
 
-// fsctlPipeImpersonate is FSCTL_PIPE_IMPERSONATE, which x/sys does not name: the control
-// ImpersonateNamedPipeClient sends, sent here by DeviceIoControl, as the register lets no file load
-// that proc.
-const fsctlPipeImpersonate = 0x11001C
-
 // clientLevel is the level at which server's thread takes on the token of the client at its end:
-// the thread token's TokenImpersonationLevel after FSCTL_PIPE_IMPERSONATE, opened as the process,
+// the thread token's TokenImpersonationLevel after ImpersonateNamedPipeClient, opened as the process,
 // as a token at identification opens to nothing else, and then reverted. The system answers
 // ERROR_CANNOT_IMPERSONATE until the server has read data the client wrote. A thread that cannot
 // revert stays locked, so the scheduler ends it rather than hand it on.
+//
+// ImpersonateNamedPipeClient is advapi32's, which x/sys does not wrap, and DeviceIoControl cannot
+// stand in for it, its control answering ERROR_INVALID_FUNCTION: the one proc go-files acquires,
+// on its one line here, which the lint excepts by file and by line.
 func clientLevel(server windows.Handle) (level uint32, err error) {
+	impersonate := windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateNamedPipeClient")
 	runtime.LockOSThread()
-	var n uint32
-	if err := windows.DeviceIoControl(server, fsctlPipeImpersonate, nil, 0, nil, 0, &n, nil); err != nil {
+	if r, _, err := impersonate.Call(uintptr(server)); r == 0 {
 		runtime.UnlockOSThread()
 		return 0, err
 	}
+	var n uint32
 	var tok windows.Token
 	err = windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &tok)
 	if err == nil {
