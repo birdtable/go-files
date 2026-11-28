@@ -1,0 +1,44 @@
+# A throwaway probe, closed with its pull request: the full suite on Windows under the race detector,
+# as the test workflow runs it, in several parallel samples, to count crashes of a test binary.
+name: probe-full
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3, 4, 5, 6]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GOFLAGS: -mod=mod
+      GOPROXY: https://proxy.golang.org
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: full suite, race, shuffled
+        run: |
+          go version
+          rc=0
+          go test -json -race -shuffle=on -count=1 ./... > "$RUNNER_TEMP/events.json" || rc=$?
+          fails=$(jq -R -r 'fromjson? | select(.Test == null and .Action == "fail") | .Package' "$RUNNER_TEMP/events.json" | tr -d '\r' | sort -u)
+          fatal=$(grep -c -E 'fatal error|unexpected return pc|Exception 0x' "$RUNNER_TEMP/events.json" || true)
+          seeds=$(jq -R -r 'fromjson? | select(.Output != null) | select(.Output | startswith("-test.shuffle")) | "\(.Package) \(.Output)"' "$RUNNER_TEMP/events.json" | tr -d '\r' | grep -F -f <(printf '%s\n' "$fails" | sed '/^$/d;s/$/ /') || true)
+          echo "probe: go test exit $rc, fatal lines $fatal, failed packages: ${fails:-none}"
+          printf '%s\n' "$seeds" | sed '/^$/d;s/^/probe seed: /'
+          test "$rc" -eq 0

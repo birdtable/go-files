@@ -27,7 +27,7 @@ func OpenAt(dir windows.Handle, name string, how How) (h windows.Handle, err err
 	if err != nil {
 		return 0, err
 	}
-	attrs := windows.OBJECT_ATTRIBUTES{Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: dir, ObjectName: u, Attributes: how.Attributes, SecurityDescriptor: how.security, SecurityQoS: identifyOnly()}
+	attrs := windows.OBJECT_ATTRIBUTES{Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: dir, ObjectName: u, Attributes: how.Attributes, SecurityDescriptor: how.security}
 	err = windows.NtCreateFile(&h, how.Access|windows.SYNCHRONIZE, &attrs, &windows.IO_STATUS_BLOCK{}, nil, 0,
 		how.Share, how.Disposition, how.Options|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
 	return h, err
@@ -107,3 +107,5 @@ func Link(h, dir windows.Handle, name string) error {
 	st := windows.NtSetInformationFile(h, &windows.IO_STATUS_BLOCK{}, (*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), fileLinkInformation) //nolint:gosec // G103: the pointer is to info, a FILE_LINK_INFORMATION, for the one call
 	return Dos(st)
 }
+
+var _ = identifyOnly // probe: the field is reverted, the helper kept
