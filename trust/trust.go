@@ -25,7 +25,7 @@
 // macOS and Windows, and the fix as data. The program configures whom it trusts (Who: RootOnly,
 // NoLinks, Group, Apart), the Kind of each path, and ReadOwned's owner, privacy and limit.
 //
-// It imports the standard library, golang.org/x/sys, confine and internal/fileid.
+// It imports the standard library, golang.org/x/sys, confine, internal/fileid and internal/procfs.
 package trust
 
 import (
