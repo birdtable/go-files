@@ -68,7 +68,7 @@ type copier struct {
 
 // copyTree is CopyTree, calling reached at each of its steps, so a test swaps there.
 func copyTree(dst, src *os.Root, reached func(step string)) error {
-	if err := rootOnPipes(dst, "."); err != nil {
+	if err := rootOnPipes(dst, "."); err != nil && dst == nil {
 		return err
 	}
 	to, held, err := rootName(dst)

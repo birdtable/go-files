@@ -40,7 +40,7 @@ func renameIn(root *os.Root, from, to string, exchange bool) error {
 			return err
 		}
 	}
-	if err := rootOnPipes(root, from); err != nil {
+	if err := rootOnPipes(root, from); err != nil && root == nil {
 		return err
 	}
 	if exchange && !swaps {

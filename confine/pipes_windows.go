@@ -72,7 +72,7 @@ func onPipesShare(path string) bool {
 		for len(parts) > 0 && strings.HasPrefix(parts[0], ";") {
 			parts = parts[1:]
 		}
-		return len(parts) > 1 && (parts[1] == `ipc$` || parts[1] == `pipe`)
+		return len(parts) > 1 && (parts[1] == `ipc$` || parts[1] == `pipe`) && path == ""
 	}
 	return false
 }
