@@ -11,6 +11,9 @@ import (
 // finalHeld refuses nothing on Windows: a file with a second name answers the name it was opened by.
 func finalHeld(fs.FileInfo) error { return nil }
 
+// finalVolume refuses no volume on Windows: a folder has no second name there.
+func finalVolume(*os.File) error { return nil }
+
 // openFinal opens path for its attributes alone, sharing all, with FILE_FLAG_BACKUP_SEMANTICS so
 // a folder opens as a file does and FILE_FLAG_OPEN_REPARSE_POINT so a link or junction at the last
 // name is opened itself.

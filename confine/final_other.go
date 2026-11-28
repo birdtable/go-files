@@ -18,3 +18,5 @@ func openFinal(string) (*os.File, error) { return nil, errNoFinal }
 func finalOf(*os.File) (string, error) { return "", errNoFinal }
 
 func finalHeld(fs.FileInfo) error { return nil }
+
+func finalVolume(*os.File) error { return nil }

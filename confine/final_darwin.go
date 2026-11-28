@@ -15,8 +15,36 @@ import (
 // path's, so the answer is not a key for the file.
 var errFinalLinks = fmt.Errorf("it has more than one name, a hard link, and macOS names such a file by whichever name was looked at last: %w", errors.ErrUnsupported)
 
+// errFinalHFS is Final's refusal on macOS of a name on an HFS+ volume: there a folder may have a
+// second name, a hard link, as a Time Machine disk's folders do, and F_GETPATH names a folder with
+// a second name, and every file and folder beneath it, by whichever of its names was looked at
+// last. HFS+ counts a folder's entries in its count of names, so that count cannot tell.
+var errFinalHFS = fmt.Errorf("it is on an HFS+ volume, where a folder may have a second name, and macOS names what is beneath such a folder by whichever of its names was looked at last: %w", errors.ErrUnsupported)
+
+// finalVolume refuses f, the file Final opened, where its volume is HFS+, fstatfs's type name
+// hfs, and where fstatfs fails, so a volume it cannot tell is not answered.
+func finalVolume(f *os.File) error {
+	conn, err := f.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var st unix.Statfs_t
+	var callErr error
+	if err := conn.Control(func(fd uintptr) { callErr = unix.Fstatfs(int(fd), &st) }); err != nil {
+		return err
+	}
+	if callErr != nil {
+		return fmt.Errorf("fstatfs of what it opened (%v): %w", callErr, errors.ErrUnsupported) //nolint:errorlint // the cause is shown, never matched
+	}
+	if unix.ByteSliceToString(st.Fstypename[:]) == "hfs" {
+		return errFinalHFS
+	}
+	return nil
+}
+
 // finalHeld refuses held, the file Final opened, read after its name, where it is not a folder and
-// has more than one name. A folder is answered: APFS gives a folder no second name.
+// has more than one name. A folder is answered: finalVolume refuses HFS+, and APFS, the volume
+// left that gives a file a second name, gives a folder none.
 func finalHeld(held fs.FileInfo) error {
 	if held.IsDir() {
 		return nil

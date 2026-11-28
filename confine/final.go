@@ -23,13 +23,14 @@ const opFinal = "final"
 // Each system answers from its own call on the handle: Windows from GetFinalPathNameByHandle's
 // normalized name with its drive, without the \\?\ prefix where the name is shorter than MAX_PATH
 // and GetFullPathName gives it back unchanged, as it does not a name that ends in a dot or a space
-// or a device name; macOS from fcntl's F_GETPATH; Linux from the link /proc/self/fd/<n>, read
-// beneath a /proc held to a procfs's root by fstatfs's magic and its inode, by openat2 crossing no
-// mount and following no magic link, as trust reads /proc. Off those three, and where the call
-// fails or answers no absolute path, as on Linux with no /proc, with a /proc that is not a procfs's
-// root, with a mount on the way to /proc/self/fd, or with no openat2 (before Linux 5.6, or refused
-// by a seccomp filter), it refuses with an *fs.PathError matching errors.ErrUnsupported, and never
-// fs.ErrNotExist. The answer is then looked at with
+// or a device name; macOS from fcntl's F_GETPATH; Linux from the link /proc/self/fd/<n>, read from
+// its own handle, opened, as self/fd is, by openat2 crossing no mount and following no magic link,
+// beneath a /proc held to a procfs's root by fstatfs's magic and its inode, as trust reads /proc.
+// Off those three, and where the call fails or answers no absolute path, as on Linux with no
+// /proc, with a /proc that is not a procfs's root, with a mount on the way to /proc/self/fd/<n> or
+// on the link itself, or with no openat2 (before Linux 5.6, or refused by a seccomp filter), it
+// refuses with an *fs.PathError matching errors.ErrUnsupported, and never fs.ErrNotExist. The
+// answer is then looked at with
 // os.Lstat and held against the open file by os.SameFile: a name that is no longer the file
 // opened, renamed or removed between the open and the read, is refused with ErrChanged, which
 // matches ErrOutside. On a Windows volume that gives no file index os.SameFile has nothing to
@@ -37,11 +38,15 @@ const opFinal = "final"
 //
 // A file with a second name, by a hard link, answers on Linux and Windows the name it was opened
 // by, as does a file reached through a bind mount on Linux. macOS's F_GETPATH answers whichever of
-// a file's names any process looked at last, which may be in another folder than path's, so on
-// macOS a file, not a folder, with more than one name is refused, matching errors.ErrUnsupported:
-// its count of names is read from the open file after the name, and again from the answer's name
-// after that, and a count above one either time refuses it, so a second name linked and unlinked
-// between the reads is counted.
+// a file's names any process looked at last, which may be in another folder than path's. On HFS+ a
+// folder may have a second name too, as a Time Machine disk's folders do, and then every name
+// beneath it answers by whichever of the folder's names was looked at last, and HFS+'s count of a
+// folder's names counts its entries, so it cannot tell: on macOS every name on an HFS+ volume
+// (fstatfs's type name hfs) is refused, matching errors.ErrUnsupported. On APFS, which gives a
+// folder no second name, a file, not a folder, with more than one name is refused, matching
+// errors.ErrUnsupported: its count of names is read from the open file after the name, and again
+// from the answer's name after that, and a count above one either time refuses it, so a second
+// name linked and unlinked between the reads is counted.
 // On Linux, in a folder that folds case (Folds tells it), the kernel answers the spelling the name
 // was first looked up by since it entered its cache, which may not be the stored one, so a caller
 // keying a name there folds the answer itself.
@@ -66,6 +71,9 @@ func final(path string, read func(*os.File) (string, error), lstat func(string) 
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
 	}
 	defer f.Close() //nolint:errcheck // read only; nothing is written through it
+	if err := finalVolume(f); err != nil {
+		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
+	}
 	name, err := read(f)
 	switch {
 	case err != nil:

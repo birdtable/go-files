@@ -32,12 +32,16 @@ func finalOf(f *os.File) (string, error) {
 // finalHeld refuses nothing on Linux: a file with a second name answers the name it was opened by.
 func finalHeld(fs.FileInfo) error { return nil }
 
+// finalVolume refuses no volume on Linux: the kernel answers the name a file was opened by, on any.
+func finalVolume(*os.File) error { return nil }
+
 // procName reads the link self/fd/<n> under proc for f's descriptor n, as trust reads
 // self/mountinfo: proc is opened and held to a procfs's root by fstatfs's magic and its inode,
-// self/fd is opened beneath it by openat2, crossing no mount and following no magic link, and the
-// link is read under that handle with readlinkat. A mount over /proc, over /proc/<pid> or over its
-// fd folder, as an owner of this mount namespace may make, is refused, and so is a kernel with no
-// openat2. A test passes another proc.
+// self/fd is opened beneath it, and the link <n> beneath that, each by openat2 crossing no mount
+// and following no magic link, the link opened itself with O_PATH|O_NOFOLLOW, and the link is read
+// from that handle by readlinkat with an empty name. A mount over /proc, over /proc/<pid>, over its
+// fd folder or on the link itself, as an owner of this mount namespace may make, is refused, and so
+// is a kernel with no openat2 or one that refuses the empty name's read. A test passes another proc.
 func procName(proc string, f *os.File) (string, error) {
 	root, err := procfs.Root(proc)
 	if err != nil {
@@ -51,9 +55,14 @@ func procName(proc string, f *os.File) (string, error) {
 	}
 	defer unix.Close(dir) //nolint:errcheck // an O_PATH descriptor, only read under
 	n := strconv.FormatUint(uint64(f.Fd()), 10)
+	link, err := procfs.Beneath(dir, n, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC)
+	if err != nil {
+		return "", &fs.PathError{Op: "openat2", Path: fds + "/" + n, Err: err}
+	}
+	defer unix.Close(link) //nolint:errcheck // an O_PATH descriptor of the link itself, only read
 	for size := 256; ; size *= 2 {
 		buf := make([]byte, size)
-		got, err := unix.Readlinkat(dir, n, buf)
+		got, err := unix.Readlinkat(link, "", buf)
 		if err != nil {
 			return "", &fs.PathError{Op: "readlinkat", Path: fds + "/" + n, Err: err}
 		}

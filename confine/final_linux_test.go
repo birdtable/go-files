@@ -101,6 +101,11 @@ func TestOnLinuxFinalCrossesNoMountOnTheWayToProcSelfFd(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), "the mounted-over rows ran") {
 		t.Errorf("this test in unshare --user --map-root-user --mount: %v:\n%s", err, out)
 	}
+	for line := range strings.Lines(string(out)) {
+		if _, row, ok := strings.Cut(line, "the link row: "); ok {
+			t.Logf("the link row: %s", strings.TrimSpace(row))
+		}
+	}
 }
 
 // finalOverProc is the test's rows in its own user and mount namespace, each mount over the last:
@@ -132,6 +137,10 @@ func finalOverProc(t *testing.T, d string) {
 		t.Errorf("before any mount: Final(%s) = %q, %v, and want its own name", file, got, err)
 	}
 
+	if linkOverFd(t, d, via) {
+		refused("a link mounted on /proc/self/fd/<n> itself, for the descriptor Final opens next")
+	}
+
 	fds := filepath.Join(d, "fds")
 	fdLinks(t, fds, via)
 	mount(fds, "/proc/self/fd", "", unix.MS_BIND)
@@ -144,4 +153,55 @@ func finalOverProc(t *testing.T, d string) {
 	fdLinks(t, "/proc/self/fd", via)
 	refused("a tmpfs over /proc, with links at self/fd")
 	t.Logf("the mounted-over rows ran")
+}
+
+// linkOverFd mounts a link naming the file through via on the link /proc/self/fd/<n> itself, n
+// being the descriptor Final opens next: a file holds n while the mount is made, by open_tree's
+// clone of the link, not followed, and move_mount onto the link, not followed, and is closed after.
+// Only openat2's RESOLVE_NO_XDEV on the last name, <n>, refuses it. It answers whether the mount
+// took: from Linux 6.12 the kernel refuses a mount on /proc/<pid>/fd/<n> as ENOENT, and then the
+// same mount onto a link of d's is made, so the refusal is the kernel's and not the call's.
+func linkOverFd(t *testing.T, d, via string) bool {
+	t.Helper()
+	link, want := filepath.Join(d, "link"), filepath.Join(via, "file")
+	if err := os.Symlink(want, link); err != nil {
+		t.Fatal(err)
+	}
+	hold, err := os.Open(filepath.Join(d, "file"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Close()
+	on := "/proc/self/fd/" + strconv.FormatUint(uint64(hold.Fd()), 10)
+	tree, err := unix.OpenTree(unix.AT_FDCWD, link, unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_SYMLINK_NOFOLLOW)
+	if err != nil {
+		t.Fatalf("open_tree of %s: %v", link, err)
+	}
+	defer unix.Close(tree)
+	if err := unix.MoveMount(tree, "", unix.AT_FDCWD, on, unix.MOVE_MOUNT_F_EMPTY_PATH); errors.Is(err, unix.ENOENT) {
+		plain := filepath.Join(d, "plain")
+		if err := os.Symlink("/nowhere", plain); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.MoveMount(tree, "", unix.AT_FDCWD, plain, unix.MOVE_MOUNT_F_EMPTY_PATH); err != nil {
+			t.Fatalf("move_mount of %s onto %s, after %s was ENOENT: %v", link, plain, on, err)
+		}
+		if target, err := os.Readlink(plain); err != nil || target != want {
+			t.Fatalf("%s by its path: %q, %v, and want %s, so the mount took", plain, target, err, want)
+		}
+		var u unix.Utsname
+		_ = unix.Uname(&u)
+		t.Logf("the link row: the kernel, %s, refuses a mount on %s itself, as ENOENT, and takes it on a link of the test's", unix.ByteSliceToString(u.Release[:]), on)
+		return false
+	} else if err != nil {
+		t.Fatalf("move_mount of %s onto %s: %v", link, on, err)
+	}
+	if target, err := os.Readlink(on); err != nil || target != want {
+		t.Fatalf("%s by its path: %q, %v, and want %s, so the mount took", on, target, err, want)
+	}
+	if err := hold.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the link row: ran, with a link mounted on %s", on)
+	return true
 }
