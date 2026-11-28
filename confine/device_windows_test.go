@@ -60,8 +60,8 @@ func openedByHand(t *testing.T, name string, reached func() error) {
 
 // A \\.\ path and a \\?\ or \??\ path that names neither a drive nor a Volume{GUID} name a device
 // or a pipe, not a file on a volume, and an open of a pipe tells its server who the caller is:
-// Resolve, Below's folder and its path, Nearest's start, Folds' root and the target of LinkFolder
-// and LinkFile refuse each, matching fs.ErrInvalid, before anything is opened. The pipe's server,
+// Resolve, Below's folder and its path, Nearest's start, Folds' root, Final's path and the target
+// of LinkFolder and LinkFile refuse each, matching fs.ErrInvalid, before anything is opened. The pipe's server,
 // which never waits, is asked after them whether a client came; a control opens a second pipe by
 // hand and is seen.
 //
@@ -98,6 +98,8 @@ func TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen(t *testing.T) {
 		refused("Nearest from "+p, err, true)
 		_, err = Folds(p)
 		refused("Folds of "+p, err, false)
+		_, err = Final(p)
+		refused("Final of "+p, err, true)
 		refused("LinkFolder to "+p, LinkFolder(root, p, fmt.Sprint("d", i)), false)
 		refused("LinkFile to "+p, LinkFile(root, p, fmt.Sprint("f", i)), false)
 	}
@@ -118,7 +120,9 @@ func TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen(t *testing.T) {
 // Where the path goes on below the junction to the pipes' folder, the system opens the pipe, so
 // each refusal there is confine's own, matching fs.ErrInvalid or ErrOutside.
 // Nearest takes the junction itself as its marker where the path ends at it, as it takes any link
-// there, and that look must not reach the pipe; a marker below it that is the pipe is refused.
+// there, and Final opens the junction itself there, as it opens a link at the last name, and
+// neither look may reach the pipe; a marker below it that is the pipe is refused, and so is Final
+// of the pipe below it, which its open reaches at identification alone.
 //
 // What it costs when this fails: a junction planted in a folder the program resolves, copies or
 // links from passes a pipe as a folder or a file, or lets its server act as the program.
@@ -140,6 +144,7 @@ func TestAJunctionToAPipeIsNoFolderOrFileToConfine(t *testing.T) {
 		{"Below's folder", func(p string) error { _, err := Below(p, dir); return err }},
 		{"Folds", func(p string) error { _, err := Folds(p); return err }},
 		{"Nearest", func(p string) error { _, err := Nearest(filepath.Dir(p), filepath.Base(p), ""); return err }},
+		{"Final", func(p string) error { _, err := Final(p); return err }},
 		{"LinkFolder", func(p string) error { return LinkFolder(root, p, "d-"+rand.Text()) }},
 		{"LinkFile", func(p string) error { return LinkFile(root, p, "f-"+rand.Text()) }},
 	}
@@ -164,9 +169,9 @@ func TestAJunctionToAPipeIsNoFolderOrFileToConfine(t *testing.T) {
 			r := reached()
 			t.Logf("native: %s through the junction %s: %v; %v", s.name, c.name, err, reachedSays(r))
 			switch {
-			case s.name == "Nearest" && p == j:
+			case (s.name == "Nearest" || s.name == "Final") && p == j:
 				if r != nil {
-					t.Errorf("Nearest of the junction %s itself as the marker reached the pipe: %v", c.name, r)
+					t.Errorf("%s of the junction %s itself reached the pipe: %v", s.name, c.name, r)
 				}
 			case s.name == "os.Stat, the control":
 			case err == nil:
