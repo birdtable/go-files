@@ -50,7 +50,7 @@ func Swap(file, fresh, aside string, opts ...Option) error {
 	if err := swapTakes(o); err != nil {
 		return fmt.Errorf("a swap of %s: %w", file, err)
 	}
-	root, err := os.OpenRoot(filepath.Dir(file))
+	root, err := openFolder(filepath.Dir(file), file, o)
 	if err != nil {
 		return err
 	}

@@ -89,6 +89,10 @@ var errNoteIsLock = errors.New("is the lock file, so no note is written or remov
 // nothing made, matching fs.ErrPermission on every system, never Held. Release
 // leaves the file behind: removing it races every process that has it open.
 //
+// On Windows a path or a note that names a device or a pipe, or is on a host's
+// pipes share, or whose folder is a host's pipes, a link on the way among them,
+// is refused before any open of it, nothing made, matching fs.ErrInvalid.
+//
 // A lock on a file another go-files call also holds, as write.Append's log, is
 // not that call's hold on Windows, where Take locks the file's first byte and
 // Append a byte past its end: there Take does not keep Append out, as it does on
@@ -112,7 +116,8 @@ func Wait(ctx context.Context, path, note string) (*Lock, error) {
 // Within root, a link in a folder of name is followed as os.Root follows it, and one at name's
 // last element is refused, as Take's is. The Lock keeps a root of its own, opened at root's
 // folder, which Release closes: root may be closed once TakeIn returns. Holder of a note below a
-// root is HolderIn.
+// root is HolderIn. On Windows a root on a host's pipes, as confine refuses one, is refused
+// before any open beneath it, matching fs.ErrInvalid; HolderIn refuses it too.
 func TakeIn(root *os.Root, name, note string) (*Lock, error) { return acquireIn(root, name, note, nil) }
 
 // WaitIn locks name below root as TakeIn does, waiting for the holder as Wait does.
@@ -123,6 +128,9 @@ func WaitIn(ctx context.Context, root *os.Root, name, note string) (*Lock, error
 // HolderIn reads the note at note below root, as Holder reads one at a path, opened through root
 // with no link followed at its last element.
 func HolderIn(root *os.Root, note string) (Held, []byte, error) {
+	if err := rootOnPipes(root, note); err != nil {
+		return Held{}, nil, err
+	}
 	if err := notUp(root, note); err != nil {
 		return Held{}, nil, err
 	}
@@ -131,6 +139,9 @@ func HolderIn(root *os.Root, note string) (Held, []byte, error) {
 
 // acquireIn is acquire below a root of the lock's own, opened at root's folder.
 func acquireIn(root *os.Root, name, note string, waited func() error) (*Lock, error) {
+	if err := rootOnPipes(root, name); err != nil {
+		return nil, err
+	}
 	for _, n := range []string{name, note} {
 		if err := notUp(root, n); err != nil {
 			return nil, err
@@ -180,6 +191,11 @@ func waiter(ctx context.Context) func() error {
 // alone and read only under testing.Testing() (in winapi), takes every volume as one with no
 // access lists.
 func acquire(at in, path, note string, waited func() error, between func(), listless bool) (*Lock, error) {
+	if at.root == nil {
+		if err := pathOnPipes(path, note); err != nil {
+			return nil, err
+		}
+	}
 	if note != "" && filepath.Clean(note) == filepath.Clean(path) {
 		return nil, fmt.Errorf("%s: the note's path %w", path, errNoteIsLock)
 	}
@@ -323,10 +339,18 @@ func (l *Lock) Note(v any) error {
 // reads as Held{}, "another process holds the lock", never as free and
 // never as an error. Holder does not say whether the lock is held; only Take
 // does. What it reads is not proven to be the holder's, as Held says.
+// On Windows a note path that names a device or a pipe, or is on a host's pipes
+// share, or whose folder is a host's pipes, is refused before any open, with an
+// error matching fs.ErrInvalid, as Take refuses it.
 func Holder(path string) (Held, []byte, error) { return holder(in{}, path) }
 
 // holder is Holder of the note at path, looked up as at says.
 func holder(at in, path string) (Held, []byte, error) {
+	if at.root == nil {
+		if err := pathOnPipes(path); err != nil {
+			return Held{}, nil, err
+		}
+	}
 	f, err := openNote(at, path)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errLink) || errors.Is(err, errNotPlain) {
 		return Held{}, nil, nil
@@ -394,7 +418,7 @@ func (l *Lock) unnote() error {
 		if l.at.root != nil {
 			return l.at.root.Remove(l.note)
 		}
-		return os.Remove(l.note) //nolint:gosec,nolintlint // the caller's note path; a removal does not follow a link; gosec's taint finding here comes and goes on windows
+		return os.Remove(l.note) //nolint:gosec,nolintlint,forbidigo // the caller's note path, in a folder pathOnPipes found on a disk; a removal does not follow a link; gosec's taint finding here comes and goes on windows
 	})
 	if errors.Is(err, fs.ErrNotExist) || inUse(err) {
 		return nil
@@ -487,28 +511,28 @@ type in struct{ root *os.Root }
 
 func (at in) lstat(name string) (fs.FileInfo, error) {
 	if at.root == nil {
-		return os.Lstat(name) //nolint:gosec // the caller's lock or note path; an Lstat follows no link
+		return lstatPath(name)
 	}
 	return at.root.Lstat(name)
 }
 
 func (at in) stat(name string) (fs.FileInfo, error) {
 	if at.root == nil {
-		return os.Stat(name)
+		return statPath(name)
 	}
 	return at.root.Stat(name)
 }
 
 func (at in) remove(name string) error {
 	if at.root == nil {
-		return os.Remove(name)
+		return os.Remove(name) //nolint:forbidigo // the caller's lock or note path, after pathOnPipes found its folder on a disk; a name there that leads to a pipe is refused by the system
 	}
 	return at.root.Remove(name)
 }
 
 func (at in) rename(from, to string) error {
 	if at.root == nil {
-		return os.Rename(from, to) //nolint:gosec // to the caller's note path; the rename replaces a link there, never follows it
+		return os.Rename(from, to) //nolint:gosec,forbidigo // to the caller's note path, in a folder pathOnPipes found on a disk; the rename replaces a link there, never follows it
 	}
 	return at.root.Rename(from, to)
 }
@@ -517,7 +541,7 @@ func (at in) rename(from, to string) error {
 // and is it and its name as at looks it up.
 func (at in) temp(note string) (*os.File, string, error) {
 	if at.root == nil {
-		f, err := os.CreateTemp(filepath.Dir(note), filepath.Base(note)+".*")
+		f, err := os.CreateTemp(filepath.Dir(note), filepath.Base(note)+".*") //nolint:forbidigo // beside the caller's note path, in a folder pathOnPipes found on a disk, by an exclusive create of a new name
 		if err != nil {
 			return nil, "", err
 		}

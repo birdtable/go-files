@@ -90,6 +90,20 @@ A program that would rather lock each folder by itself has three more traps, whi
 - **A run that makes its folder before it takes its lock** can have the folder removed from under it by a sweep that comes in between and takes the new, free lock itself; the run takes the lock first.
 - **A lock file that is missing, a link or not a plain file:** `Take` makes a missing one, which is right for a run that stopped; a link or a pipe is refused, and the sweep reports it, never counting it as held or free. The lock files then build up, since removing one after `Release` races a `Take` of the same name, as `Take` says.
 
+## Pipes on Windows
+
+A lock path, a note or a root that leads to a host's named pipes would have the lock's look and
+open reach a pipe, whose server could act as the program. On Windows each call refuses one before
+any open of it, matching `fs.ErrInvalid`, and each look and open by path asks for identification
+alone.
+
+| guard | test |
+| --- | --- |
+| `Take`, `Wait` and `Holder`: a lock path or a note that names a device or a pipe (`\\.\`, or `\\?\` or `\??\` naming neither a drive nor a `Volume{GUID}`), or is on a host's pipes share (`IPC$` or `pipe`, in any UNC spelling or a `\\?\GLOBALROOT\Device\Mup\` name), or whose folder, opened with identification alone, is a host's pipes by its own handle, a junction to the pipes' folder among them, refused before any open of it | `TestEachCallRefusesALockOrANoteInAHostsPipes` |
+| `TakeIn`, `WaitIn` and `HolderIn`: a root on the pipes' device or on a host's pipes share, as confine refuses one, refused before any open beneath it | `TestEachCallRefusesALockOrANoteInAHostsPipes` (native: where the system opens no root on a folder, logged) |
+| the looks and the open of a lock path or note by path (`winapi.Lstat`, `winapi.Stat`, `winapi.CreateFile`), and the folder a lock file is made in by path (`winapi.OpenFolder`), ask for identification alone; the make refuses a folder on a host's pipes by its handle | internal/winapi's `TestAFolderOnAHostsPipesIsRefusedByItsOwnHandleAndNoMakeInItReachesAPipe` |
+| no `os` call by name in a file of lock that Windows builds, but `os.Remove`, `os.Rename` and `os.CreateTemp` of a note, each after the check found its folder on a disk and with a nolint that says so | the lint's pipe-by-path row; the lint task's plants, Windows-built `lock/p.go` and `lock/p_unix.go` each calling `os.ReadFile`, named by the row |
+
 ## Libraries looked at
 
 The standard library and `golang.org/x` first.

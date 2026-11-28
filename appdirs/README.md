@@ -311,6 +311,7 @@ own device: a file system another account mounts on the folder reports any owner
 | the `Apart` of each `who` given, joined | `TestTempJoinsTheApartFoldersOfEachWhoItIsGiven` |
 | `TempOverflow` refuses with `trust.ErrOverflow` off Linux (matching `errors.ErrUnsupported` too) and on Linux where the uid_map maps root, and makes nothing | `TestTempOverflowRefusesOffLinuxAndWhereTheUIDMapMapsRoot` |
 | on Windows, a device or pipe path (`\\.\`, or `\\?\` or `\??\` naming neither a drive nor a `Volume{GUID}`) as a folder of `apart`, refused matching `fs.ErrInvalid` before anything is opened or made | `TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen` |
+| on Windows, the temp folder made by `internal/winapi`'s `MakeFolder`, its parent opened by `winapi.OpenFolder`, which asks for identification alone, and refused matching `fs.ErrInvalid`, nothing made, where that parent is a host's pipes by its own handle (the pipes' device or a pipes share, a junction to the pipes' folder among them) | internal/winapi's `TestAFolderOnAHostsPipesIsRefusedByItsOwnHandleAndNoMakeInItReachesAPipe` |
 | in a namespace that maps this account and not root, `TempOverflow` is a private folder `0700`, answered again, and `Temp` refuses the overflow account by name | `TestInAUserNamespaceTempOverflowIsAPrivateFolderAndTempRefusesTheOverflowAccount` (Linux, in `unshare --user --map-current-user`) |
 
 Another account's folder on the way cannot be made by a test that is not root, which every rule

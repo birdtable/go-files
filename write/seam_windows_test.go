@@ -27,3 +27,10 @@ func noFileIndex() Option {
 func linkWith(answer func() error) Option {
 	return func(o *options) { o.linkAnswer = answer }
 }
+
+// goOpenWith hands seen each folder a call by a path opens by os.OpenRoot, before the open, so a
+// test sees whether Go's open, which passes no quality of service, reached a folder. openFolder
+// reads it only under testing.Testing().
+func goOpenWith(seen func(dir string)) Option {
+	return func(o *options) { o.goOpen = seen }
+}

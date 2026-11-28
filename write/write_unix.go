@@ -140,3 +140,10 @@ func move(root *os.Root, from, to string, _ options) (late bool, err error) {
 // link hard-links tmp at name, over nothing, by the name: no call links a descriptor on every Unix,
 // so a file put at tmp since the last check is the one linked, and linked takes it away again.
 func (sysOptions) link(root *os.Root, tmp, name string, _ *grip) error { return root.Link(tmp, name) }
+
+// rootOnPipes refuses nothing: only Windows has a pipes' device a root can be opened on.
+func rootOnPipes(*os.Root, string) error { return nil }
+
+// folderOnPipes refuses nothing: off Windows no path names a device or a pipe by its spelling, and
+// a pipe at a name is refused by the open beneath the root.
+func folderOnPipes(string, string) error { return nil }

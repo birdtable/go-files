@@ -4,7 +4,6 @@ package appdirs
 
 import (
 	"io/fs"
-	"os"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -68,5 +67,5 @@ func dosPath(p string) string {
 // is made in it inherits. A volume that keeps no access lists is refused with ErrNoAccessList.
 // listless takes every volume as one (temp).
 func newFolder(dir string, listless bool) error {
-	return winapi.MakeFolder(os.Open, dir, winapi.Listless{Err: ErrNoAccessList, Test: listless}) //nolint:forbidigo // after trust.Path judged every folder above dir: no account but the trusted ones may change one, so none planted a junction to a pipe there
+	return winapi.MakeFolder(winapi.OpenFolder, dir, winapi.Listless{Err: ErrNoAccessList, Test: listless})
 }

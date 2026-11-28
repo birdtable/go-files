@@ -53,6 +53,9 @@ func makeInherited(open Open, path string, how How, refuse *Listless, took func(
 		return err
 	}
 	defer func() { err = errors.Join(err, d.Close()) }()
+	if err := OnPipes(d, path); err != nil {
+		return err
+	}
 	if refuse != nil {
 		if err := keepsLists(d, path, *refuse); err != nil {
 			return err

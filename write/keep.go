@@ -40,7 +40,7 @@ func Keep(file, folder, name string, opts ...Option) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root, err := os.OpenRoot(folder)
+	root, err := openFolder(folder, filepath.Join(folder, name), o)
 	if err != nil {
 		return "", errors.Join(err, src.Close())
 	}
@@ -62,6 +62,9 @@ func Keep(file, folder, name string, opts ...Option) (string, error) {
 // half-made one removed, by its last name under that folder, as Keep's is under its folder.
 func KeepIn(from *os.Root, file string, to *os.Root, kept string, opts ...Option) error {
 	o, err := keeping(filepath.Base(kept), opts)
+	if err == nil {
+		err = errors.Join(rootOnPipes(from, file), rootOnPipes(to, kept))
+	}
 	if err == nil {
 		err = errors.Join(named(from, file), named(to, kept))
 	}
@@ -136,7 +139,7 @@ func plainName(name string) error {
 }
 
 func source(file string, o options) (*os.File, fs.FileInfo, error) {
-	dir, err := os.OpenRoot(filepath.Dir(file))
+	dir, err := openFolder(filepath.Dir(file), file, o)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -168,7 +171,10 @@ func PutBack(kept, file string, holds [sha256.Size]byte, opts ...Option) error {
 	if err != nil {
 		return err
 	}
-	root, err := os.OpenRoot(filepath.Dir(file))
+	root, err := openFolder(filepath.Dir(file), file, settle(opts))
+	if errors.Is(err, fs.ErrInvalid) { // a device, a pipe or a pipes share, not a change
+		return errors.Join(fmt.Errorf("%s: %w", file, err), src.Close())
+	}
 	if err != nil {
 		return errors.Join(fmt.Errorf("%s %w: %w", file, ErrChanged, err), src.Close())
 	}
@@ -187,7 +193,10 @@ func PutBack(kept, file string, holds [sha256.Size]byte, opts ...Option) error {
 // crosses the roots. Every step goes through the root its name is beneath, as KeepIn's do. On
 // Windows its rename is tried again for about 600 ms, as File's is.
 func PutBackIn(from *os.Root, kept string, to *os.Root, file string, holds [sha256.Size]byte, opts ...Option) error {
-	err := named(from, kept)
+	err := errors.Join(rootOnPipes(from, kept), rootOnPipes(to, file))
+	if err == nil {
+		err = named(from, kept)
+	}
 	var src *os.File
 	var info fs.FileInfo
 	if err == nil {
