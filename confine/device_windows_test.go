@@ -115,6 +115,8 @@ func TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen(t *testing.T) {
 // winapi.Stat and winapi.OpenPath, which reach a pipe at identification alone, so its server
 // learns who the caller is and may act as it in nothing (internal/winapi's tests show the level).
 // Whether each reaches the pipe is logged, as this system's own answer, with what os.Stat does.
+// Where the path goes on below the junction to the pipes' folder, the system opens the pipe, so
+// each refusal there is confine's own, matching fs.ErrInvalid or ErrOutside.
 // Nearest takes the junction itself as its marker where the path ends at it, as it takes any link
 // there, and that look must not reach the pipe; a marker below it that is the pipe is refused.
 //
@@ -166,8 +168,11 @@ func TestAJunctionToAPipeIsNoFolderOrFileToConfine(t *testing.T) {
 				if r != nil {
 					t.Errorf("Nearest of the junction %s itself as the marker reached the pipe: %v", c.name, r)
 				}
-			case err == nil && s.name != "os.Stat, the control":
+			case s.name == "os.Stat, the control":
+			case err == nil:
 				t.Errorf("%s of %s through the junction %s: no error, and a pipe is no folder or file to it", s.name, p, c.name)
+			case p != j && !errors.Is(err, fs.ErrInvalid) && !errors.Is(err, ErrOutside):
+				t.Errorf("%s of %s through the junction %s: %v, and want its own refusal, matching fs.ErrInvalid or ErrOutside", s.name, p, c.name, err)
 			}
 		}
 	}

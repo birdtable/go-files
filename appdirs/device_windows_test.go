@@ -107,7 +107,9 @@ func TestAPathToAPipeOrADeviceIsRefusedBeforeAnyOpen(t *testing.T) {
 // name passes winapi.Identify, so a pipe it reaches lets its server learn who the caller is and act
 // as it in nothing (internal/winapi's tests show the level). Volume and Free read the volume's root
 // from their own handle, never from the path again. Whether each reaches the pipe is logged, as
-// this system's own answer, with what os.Stat does.
+// this system's own answer, with what os.Stat does. Where the path goes on below the junction to
+// the pipes' folder, the system opens the pipe, so Volume's and Free's refusal there is their own,
+// matching fs.ErrInvalid; a folder kept apart is refused by the system's own open of the pipe.
 //
 // What it costs when this fails: a junction planted where the program asks of a volume, or names a
 // folder to keep its temp folder apart from, passes a pipe as a folder, or lets its server act as
@@ -146,8 +148,12 @@ func TestAJunctionToAPipeIsNoFolderToAppdirs(t *testing.T) {
 			p := c.path(j, name)
 			err := s.call(p)
 			t.Logf("native: %s through the junction %s: %v; %v", s.name, c.name, err, reachedSays(reached()))
-			if err == nil && s.name != "os.Stat, the control" {
+			switch {
+			case s.name == "os.Stat, the control":
+			case err == nil:
 				t.Errorf("%s of %s through the junction %s: no error, and a pipe is no folder to it", s.name, p, c.name)
+			case p != j && s.name != "temp apart" && !errors.Is(err, fs.ErrInvalid):
+				t.Errorf("%s of %s through the junction %s: %v, and want its own refusal of a pipe, matching fs.ErrInvalid", s.name, p, c.name, err)
 			}
 		}
 	}
