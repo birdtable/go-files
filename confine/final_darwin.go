@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -15,15 +16,23 @@ import (
 // path's, so the answer is not a key for the file.
 var errFinalLinks = fmt.Errorf("it has more than one name, a hard link, and macOS names such a file by whichever name was looked at last: %w", errors.ErrUnsupported)
 
-// errFinalHFS is Final's refusal on macOS of a name on an HFS+ volume: there a folder may have a
-// second name, a hard link, as a Time Machine disk's folders do, and F_GETPATH names a folder with
-// a second name, and every file and folder beneath it, by whichever of its names was looked at
-// last. HFS+ counts a folder's entries in its count of names, so that count cannot tell.
-var errFinalHFS = fmt.Errorf("it is on an HFS+ volume, where a folder may have a second name, and macOS names what is beneath such a folder by whichever of its names was looked at last: %w", errors.ErrUnsupported)
+// finalType is whether t, fstatfs's type name, is a file system Final answers on, on macOS: one
+// that gives a folder no second name. On any other, HFS+, where a folder may have one, as a Time
+// Machine disk's folders do, a network share, a FUSE volume, or a type not listed, F_GETPATH may
+// name a folder, and all beneath it, by whichever of its names any process looked at last.
+func finalType(t string) bool {
+	switch t {
+	case "apfs", "msdos", "exfat":
+		return true
+	}
+	return false
+}
 
-// finalVolume refuses f, the file Final opened, where its volume is HFS+, fstatfs's type name
-// hfs, and where fstatfs fails, so a volume it cannot tell is not answered.
-func finalVolume(f *os.File) error {
+// finalVolumes refuses f, the file Final opened, unless its volume and the volume of every folder
+// of name, the answer, up to /, are of a finalType: a volume mounted beneath a folder with a second
+// name is named through it, so the answer is no key unless every volume on the way is listed. A
+// volume that cannot be read is refused too.
+func finalVolumes(f *os.File, name string) error {
 	conn, err := f.SyscallConn()
 	if err != nil {
 		return err
@@ -33,18 +42,28 @@ func finalVolume(f *os.File) error {
 	if err := conn.Control(func(fd uintptr) { callErr = unix.Fstatfs(int(fd), &st) }); err != nil {
 		return err
 	}
-	if callErr != nil {
-		return fmt.Errorf("fstatfs of what it opened (%v): %w", callErr, errors.ErrUnsupported) //nolint:errorlint // the cause is shown, never matched
+	for at := "what it opened"; ; {
+		if callErr != nil {
+			return fmt.Errorf("the volume of %s cannot be read (%v): %w", at, callErr, errors.ErrUnsupported) //nolint:errorlint // the cause is shown, never matched
+		}
+		if t := unix.ByteSliceToString(st.Fstypename[:]); !finalType(t) {
+			return fmt.Errorf("%s is on a volume of type %q, and macOS answers a name only on apfs, msdos or exfat, which give a folder no second name: %w", at, t, errors.ErrUnsupported)
+		}
+		if name == "/" {
+			return nil
+		}
+		name = filepath.Dir(name)
+		at = name + ", a folder of the name answered"
+		callErr = unix.Statfs(name, &st)
+		for errors.Is(callErr, unix.EINTR) {
+			callErr = unix.Statfs(name, &st)
+		}
 	}
-	if unix.ByteSliceToString(st.Fstypename[:]) == "hfs" {
-		return errFinalHFS
-	}
-	return nil
 }
 
 // finalHeld refuses held, the file Final opened, read after its name, where it is not a folder and
-// has more than one name. A folder is answered: finalVolume refuses HFS+, and APFS, the volume
-// left that gives a file a second name, gives a folder none.
+// has more than one name. A folder is answered: finalVolumes answers only on a finalType, none of
+// which gives a folder a second name.
 func finalHeld(held fs.FileInfo) error {
 	if held.IsDir() {
 		return nil

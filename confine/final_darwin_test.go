@@ -48,15 +48,14 @@ func TestOnMacOSFinalOfANameThisAccountMayNotReadIsErrPermission(t *testing.T) {
 	}
 }
 
-// hfsVolume makes a 20 MB journaled HFS+ disk image in d with hdiutil, which needs no root (HFS+
-// gives a folder a second name only where it is journaled), and attaches it on a new folder there,
-// which it answers; it is detached when the test ends. hdiutil is on every Mac, so nothing here
-// skips: a Mac that cannot make or attach one fails the test.
-func hfsVolume(t *testing.T, d string) string {
+// volume makes a 20 MB disk image img of the file system kind, hdiutil's -fs, which needs no root,
+// attaches it on mnt, a folder it makes, and checks that fstatfs names mnt's volume want; it is
+// detached when the test ends, after any volume attached beneath it. hdiutil is on every Mac, so
+// nothing here skips: a Mac that cannot make or attach one fails the test.
+func volume(t *testing.T, kind, want, img, mnt string) {
 	t.Helper()
-	img, mnt := filepath.Join(d, "hfs.dmg"), filepath.Join(d, "hfs")
-	if out, err := exec.CommandContext(t.Context(), "/usr/bin/hdiutil", "create", "-fs", "JHFS+", "-size", "20m", "-volname", "final", img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
-		t.Fatalf("hdiutil create: %v: %s", err, out)
+	if out, err := exec.CommandContext(t.Context(), "/usr/bin/hdiutil", "create", "-fs", kind, "-size", "20m", "-volname", "final", img).CombinedOutput(); err != nil { //nolint:gosec // G204: hdiutil by its full path, on the test's own folder
+		t.Fatalf("hdiutil create -fs %s: %v: %s", kind, err, out)
 	}
 	if err := os.Mkdir(mnt, 0o700); err != nil {
 		t.Fatal(err)
@@ -70,10 +69,47 @@ func hfsVolume(t *testing.T, d string) string {
 		}
 	})
 	var st unix.Statfs_t
-	if err := unix.Statfs(mnt, &st); err != nil || unix.ByteSliceToString(st.Fstypename[:]) != "hfs" || unix.ByteSliceToString(st.Mntonname[:]) != mnt {
-		t.Fatalf("the image on %s: type %q on %q, %v, and want hfs mounted on it", mnt, unix.ByteSliceToString(st.Fstypename[:]), unix.ByteSliceToString(st.Mntonname[:]), err)
+	if err := unix.Statfs(mnt, &st); err != nil || unix.ByteSliceToString(st.Fstypename[:]) != want || unix.ByteSliceToString(st.Mntonname[:]) != mnt {
+		t.Fatalf("the image on %s: type %q on %q, %v, and want %s mounted on it", mnt, unix.ByteSliceToString(st.Fstypename[:]), unix.ByteSliceToString(st.Mntonname[:]), err, want)
 	}
-	return mnt
+}
+
+// hfsLinked attaches a journaled HFS+ image on d/hfs (HFS+ gives a folder a second name only where
+// it is journaled) and gives its folder d1/x a second name, d2/y, by link(2), as Time Machine
+// does; it answers the volume, x and y.
+func hfsLinked(t *testing.T, d string) (mnt, x, y string) {
+	t.Helper()
+	mnt = filepath.Join(d, "hfs")
+	volume(t, "JHFS+", "hfs", filepath.Join(d, "hfs.dmg"), mnt)
+	x, y = filepath.Join(mnt, "d1", "x"), filepath.Join(mnt, "d2", "y")
+	for _, dir := range []string{x, filepath.Dir(y)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := unix.Link(x, y); err != nil {
+		t.Fatalf("link of the folder %s as %s on HFS+: %v", x, y, err)
+	}
+	return mnt, x, y
+}
+
+// finalRefusedWhileLooked checks that Final refuses p, matching errors.ErrUnsupported, and so does
+// final with other looked at between the open and the read, as any process may look at it, after
+// which F_GETPATH answers by that name.
+func finalRefusedWhileLooked(t *testing.T, p, other string) {
+	t.Helper()
+	if got, err := Final(p); !errors.Is(err, errors.ErrUnsupported) || got != "" {
+		t.Errorf("Final of %s = %q, %v, and want errors.ErrUnsupported", p, got, err)
+	}
+	lookThenRead := func(f *os.File) (string, error) {
+		if _, err := os.Lstat(other); err != nil {
+			return "", err
+		}
+		return finalOf(f)
+	}
+	if got, err := final(p, lookThenRead, os.Lstat); !errors.Is(err, errors.ErrUnsupported) || got != "" {
+		t.Errorf("Final of %s, while %s is looked at = %q, %v, and want errors.ErrUnsupported", p, other, got, err)
+	}
 }
 
 // What it costs when this fails: on an HFS+ volume, as a Time Machine disk is, a folder with a
@@ -81,37 +117,45 @@ func hfsVolume(t *testing.T, d string) string {
 // process looked at last, in another folder than the path's: a journal keys one file by two names.
 func TestOnMacOSFinalRefusesEveryNameOnAnHFSPlusVolume(t *testing.T) {
 	t.Parallel()
-	mnt := hfsVolume(t, finalTemp(t))
-	x, y := filepath.Join(mnt, "d1", "x"), filepath.Join(mnt, "d2", "y")
-	for _, dir := range []string{x, filepath.Dir(y)} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	mnt, x, y := hfsLinked(t, finalTemp(t))
 	file := filepath.Join(mnt, "file")
 	for _, f := range []string{file, filepath.Join(x, "inside")} {
 		if err := os.WriteFile(f, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// HFS+ gives a folder a second name by link(2), as Time Machine does.
-	if err := unix.Link(x, y); err != nil {
-		t.Fatalf("link of the folder %s as %s on HFS+: %v", x, y, err)
-	}
-	// Each name, by Final, and by final with the folder's other name looked at between the open and
-	// the read, as any process may look at it, after which F_GETPATH answers by that name.
 	for _, row := range []struct{ p, other string }{{mnt, y}, {file, y}, {x, y}, {filepath.Join(x, "inside"), y}, {y, x}} {
-		if got, err := Final(row.p); !errors.Is(err, errors.ErrUnsupported) || got != "" {
-			t.Errorf("Final on HFS+ of %s = %q, %v, and want errors.ErrUnsupported", row.p, got, err)
-		}
-		lookThenRead := func(f *os.File) (string, error) {
-			if _, err := os.Lstat(row.other); err != nil {
-				return "", err
-			}
-			return finalOf(f)
-		}
-		if got, err := final(row.p, lookThenRead, os.Lstat); !errors.Is(err, errors.ErrUnsupported) || got != "" {
-			t.Errorf("Final on HFS+ of %s, while %s is looked at = %q, %v, and want errors.ErrUnsupported", row.p, row.other, got, err)
-		}
+		finalRefusedWhileLooked(t, row.p, row.other)
+	}
+}
+
+// What it costs when this fails: a volume of a listed type attached beneath an HFS+ folder with a
+// second name, which any account may attach on a folder it owns, is named through that folder by
+// whichever of its names was looked at last, so one file there answers by two names; and a volume
+// of a type not listed answers a name that may be no key.
+func TestOnMacOSFinalAnswersOnlyWhereEveryVolumeOnTheWayIsListed(t *testing.T) {
+	t.Parallel()
+	d := finalTemp(t)
+	_, x, y := hfsLinked(t, d)
+	apfs := filepath.Join(x, "m")
+	volume(t, "APFS", "apfs", filepath.Join(d, "apfs.dmg"), apfs)
+	file := filepath.Join(apfs, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	finalRefusedWhileLooked(t, file, y)
+	finalRefusedWhileLooked(t, apfs, y)
+
+	// A type not listed, the device file system, is refused; a listed one beneath APFS answers.
+	if got, err := Final("/dev/null"); !errors.Is(err, errors.ErrUnsupported) || got != "" {
+		t.Errorf("Final of /dev/null, on devfs = %q, %v, and want errors.ErrUnsupported", got, err)
+	}
+	fat := filepath.Join(d, "fat")
+	volume(t, "MS-DOS", "msdos", filepath.Join(d, "fat.dmg"), fat)
+	if err := os.WriteFile(filepath.Join(fat, "FILE"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := finalOK(t, filepath.Join(fat, "FILE")); got != filepath.Join(fat, "FILE") {
+		t.Errorf("Final of a file on msdos beneath APFS = %q, and want its own name", got)
 	}
 }

@@ -19,4 +19,4 @@ func finalOf(*os.File) (string, error) { return "", errNoFinal }
 
 func finalHeld(fs.FileInfo) error { return nil }
 
-func finalVolume(*os.File) error { return nil }
+func finalVolumes(*os.File, string) error { return nil }

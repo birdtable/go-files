@@ -40,10 +40,13 @@ const opFinal = "final"
 // by, as does a file reached through a bind mount on Linux. macOS's F_GETPATH answers whichever of
 // a file's names any process looked at last, which may be in another folder than path's. On HFS+ a
 // folder may have a second name too, as a Time Machine disk's folders do, and then every name
-// beneath it answers by whichever of the folder's names was looked at last, and HFS+'s count of a
-// folder's names counts its entries, so it cannot tell: on macOS every name on an HFS+ volume
-// (fstatfs's type name hfs) is refused, matching errors.ErrUnsupported. On APFS, which gives a
-// folder no second name, a file, not a folder, with more than one name is refused, matching
+// beneath it, a volume mounted there too, answers by whichever of the folder's names was looked at
+// last, and HFS+'s count of a folder's names counts its entries, so it cannot tell; a network or
+// FUSE volume's server decides what is one folder. So on macOS a name is a key only on a volume
+// that gives a folder no second name: Final answers only where the opened file's volume and the
+// volume of every folder of the answer up to / are apfs, msdos or exfat (fstatfs's type name), and
+// refuses a name on another volume, or beneath one, matching errors.ErrUnsupported. There, a file,
+// not a folder, with more than one name, as APFS gives one, is refused, matching
 // errors.ErrUnsupported: its count of names is read from the open file after the name, and again
 // from the answer's name after that, and a count above one either time refuses it, so a second
 // name linked and unlinked between the reads is counted.
@@ -71,9 +74,6 @@ func final(path string, read func(*os.File) (string, error), lstat func(string) 
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
 	}
 	defer f.Close() //nolint:errcheck // read only; nothing is written through it
-	if err := finalVolume(f); err != nil {
-		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
-	}
 	name, err := read(f)
 	switch {
 	case err != nil:
@@ -82,6 +82,9 @@ func final(path string, read func(*os.File) (string, error), lstat func(string) 
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: fmt.Errorf("the system cannot say the name of what it opened (%v): %w", err, errors.ErrUnsupported)} //nolint:errorlint // the cause is shown, never matched: a /proc ENOENT is not the file gone
 	case !filepath.IsAbs(name):
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: fmt.Errorf("the system named what it opened %q, which is not an absolute path: %w", name, errors.ErrUnsupported)}
+	}
+	if err := finalVolumes(f, name); err != nil {
+		return "", &fs.PathError{Op: opFinal, Path: path, Err: err}
 	}
 	// held is read after the name, and got after held, and each is counted by finalHeld: a second
 	// name that the name may be, linked and unlinked by another process between the reads, is

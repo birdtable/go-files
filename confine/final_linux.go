@@ -32,8 +32,8 @@ func finalOf(f *os.File) (string, error) {
 // finalHeld refuses nothing on Linux: a file with a second name answers the name it was opened by.
 func finalHeld(fs.FileInfo) error { return nil }
 
-// finalVolume refuses no volume on Linux: the kernel answers the name a file was opened by, on any.
-func finalVolume(*os.File) error { return nil }
+// finalVolumes refuses no volume on Linux: the kernel answers the name a file was opened by, on any.
+func finalVolumes(*os.File, string) error { return nil }
 
 // procName reads the link self/fd/<n> under proc for f's descriptor n, as trust reads
 // self/mountinfo: proc is opened and held to a procfs's root by fstatfs's magic and its inode,
