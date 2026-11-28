@@ -9,6 +9,8 @@
 // by hard links, RenameNoReplace and RenameExchange move names in one step under the same
 // refusals, LinkFolder makes a link to a folder, a junction on Windows, and CopyTree copies a tree
 // root to root, making each link inside it again and refusing one that leads outside.
+// Final answers the system's own name for a folder or file, read from a handle open on it, so two
+// spellings of one file answer the same bytes.
 // The README says how, on each system.
 //
 // On Windows a path that names a device or a pipe, not a path on a drive or a volume (\\.\, or
@@ -24,7 +26,7 @@
 // and a link to a folder. The program configures the root, each name, and each call's flags and
 // mode.
 //
-// It imports the standard library, golang.org/x/sys, golang.org/x/text/unicode/norm and internal/fileid, and on Windows internal/winapi.
+// It imports the standard library, golang.org/x/sys, golang.org/x/text/unicode/norm and internal/fileid, on Linux internal/procfs, and on Windows internal/winapi.
 package confine
 
 import (
@@ -49,9 +51,10 @@ const (
 // written or moved.
 var ErrOutside = errors.New("the path leads outside the folder, or through a link")
 
-// ErrChanged is Resolve's and Below's refusal of a path that changed while it was walked: the
-// system's own look at it found another file than the walk, or something where the walk found
-// nothing, or a folder of the walk was another file when its file index was read. A missing name
+// ErrChanged is Resolve's, Below's and Final's refusal of a path that changed while it was walked:
+// the system's own look at it found another file than the walk, or something where the walk found
+// nothing, or a folder of the walk was another file when its file index was read, or the name the
+// system gave Final for the file it opened is not that file. A missing name
 // made by another process while the path was walked is refused so, as is a link swapped. It tells
 // "the path changed under the walk" from "the path leads outside", never that the change was
 // harmless. It matches ErrOutside.
