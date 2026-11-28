@@ -66,14 +66,16 @@ func connected(t *testing.T, server windows.Handle) bool {
 
 // A symbolic link can name a host's pipe over the loopback share, \\localhost\pipe\<name>, which the
 // pipes check reads from no name on the caller's path, so the folder open of write and lock,
-// OpenFolder, is asked to follow it before OnPipes reads a handle. The system's server for the
-// share opens the pipe for the caller, and a remote pipe's open ignores the level flags its client
-// passes, so the level the pipe's server gets is measured here for each open: the control, a
-// windows.CreateFile with no quality of service; CreateFile, which asks for identification; and
-// OpenFolder. Each is made at the share's name itself and through a link of each kind, a file's
-// and a folder's, to it. An open that reaches the pipe and may write writes a byte the server reads
-// first; an open that is refused is shown to leave the pipe with no client. Each answer is logged as
-// native. A control must reach the pipe, by one name or another, for the test to see a level. A
+// OpenFolder, follows it before OnPipes reads a handle. The system's server for the share opens the
+// pipe for the caller, and a remote pipe's open is said to ignore the level flags its client
+// passes, so the level the pipe's server gets is read here for each open, at the share's name and
+// through a link of each kind, a file's and a folder's: the control, a windows.CreateFile with no
+// quality of service, gives it SecurityImpersonation; CreateFile, which asks for identification,
+// gives SecurityIdentification; and OpenFolder, which writes nothing, gives SecurityIdentification
+// too, as the share's server takes the client's token at the open. The loopback share keeps the
+// level asked. Through a folder's link every open is refused, and the pipe is shown to have no
+// client. A client that may write writes a byte the server reads first. Each answer is logged as
+// native, and a control must reach the pipe by one name or another for the test to see a level. A
 // link is made by CreateSymbolicLink itself, as os.Symlink would open its target, the pipe, to
 // choose a link's kind; making one needs the right to make links, which CI holds as an
 // administrator.
@@ -103,7 +105,7 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 		open    func(path string) (windows.Handle, error)
 		control bool   // whether it is the control, which counts as reaching the pipe
 		writes  bool   // whether the client writes a byte, which the server reads before it asks
-		want    uint32 // the level a client that writes should give the server
+		want    uint32 // the level the open gives the server once it reaches the pipe
 	}{
 		{"windows.CreateFile with no quality of service, the control", byPath(func(p *uint16) (windows.Handle, error) {
 			return windows.CreateFile(p, rw, 0, nil, windows.OPEN_EXISTING, 0, 0)
@@ -119,7 +121,7 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 			var h windows.Handle
 			err = windows.DuplicateHandle(windows.CurrentProcess(), windows.Handle(f.Fd()), windows.CurrentProcess(), &h, 0, false, windows.DUPLICATE_SAME_ACCESS)
 			return h, errors.Join(err, f.Close())
-		}, false, false, 0},
+		}, false, false, windows.SecurityIdentification},
 	}
 	ways := []struct {
 		name string
@@ -170,8 +172,8 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 				if !c.writes {
 					level, err := clientLevel(server)
 					t.Logf("native: the server of a client that wrote nothing took on its token at %s, %v", levels(level), err)
-					if !errors.Is(err, windows.ERROR_CANNOT_IMPERSONATE) {
-						t.Errorf("the server took on the token of a client that wrote nothing: %s, %v, and want ERROR_CANNOT_IMPERSONATE", levels(level), err)
+					if err != nil || level != c.want {
+						t.Errorf("the server took on the token of a client that wrote nothing at %s, %v, and want %s", levels(level), err, levels(c.want))
 					}
 					return
 				}
