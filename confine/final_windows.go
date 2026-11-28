@@ -1,6 +1,8 @@
 package confine
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"syscall"
@@ -18,7 +20,9 @@ func finalVolumes(*os.File, string) error { return nil }
 // openFinal opens path for its attributes alone, sharing all, with FILE_FLAG_BACKUP_SEMANTICS so
 // a folder opens as a file does and FILE_FLAG_OPEN_REPARSE_POINT so a link or junction at the last
 // name is opened itself, by winapi.CreateFile, which asks for identification alone, so a pipe a
-// link on the way leads to learns who the caller is and may act as it in nothing.
+// link on the way leads to learns who the caller is and may act as it in nothing. What opens as
+// any file type but a disk's, a pipe or a device a link on the way leads to, is no folder or file:
+// it is closed and refused, matching fs.ErrInvalid, before any call asks it its name.
 func openFinal(path string) (*os.File, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -29,7 +33,15 @@ func openFinal(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(h), path), nil // owns h, and closes it
+	f := os.NewFile(uintptr(h), path) // owns h, and closes it
+	t, err := windows.GetFileType(h)
+	if err == nil && t != windows.FILE_TYPE_DISK {
+		err = fmt.Errorf("it opened as file type %d, a pipe or a device, no folder or file: %w", t, fs.ErrInvalid)
+	}
+	if err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	return f, nil
 }
 
 // finalOf asks GetFinalPathNameByHandle for f's normalized name with its drive, then drops the

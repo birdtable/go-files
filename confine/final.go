@@ -20,7 +20,11 @@ const opFinal = "final"
 // path is absolute, and is opened as the system opens it: every link before its last name is
 // followed, and a link at its last name is not, so a link answers its own name, in the folder the
 // system names, on Linux and Windows, and is refused on macOS, as it is no folder. To name what a
-// link leads to, pass Resolve's answer.
+// link leads to, pass Resolve's answer. On Windows a path that names a device or a pipe, not a path
+// on a drive or a volume (\\.\, or \\?\ or \??\ naming neither a drive nor a Volume{GUID}), is
+// refused before anything is opened, matching fs.ErrInvalid and ErrOutside; the open asks for
+// identification alone, and a pipe or a device it reaches by a link on the way is no folder or
+// file and is refused, matching fs.ErrInvalid.
 //
 // Each system answers from its own call on the handle: Windows from GetFinalPathNameByHandle's
 // normalized name with its drive, without the \\?\ prefix where the name is shorter than MAX_PATH
@@ -78,6 +82,9 @@ func Final(path string) (string, error) {
 func final(path string, read func(*os.File) (string, error), lstat func(string) (fs.FileInfo, error)) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", &fs.PathError{Op: opFinal, Path: path, Err: fmt.Errorf("it is not an absolute path: %w", errors.Join(fs.ErrInvalid, ErrOutside))}
+	}
+	if err := notDevice(opFinal, path); err != nil {
+		return "", err
 	}
 	f, err := openFinal(path)
 	if err != nil {

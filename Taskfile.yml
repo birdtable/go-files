@@ -395,7 +395,7 @@ tasks:
         timeout: 2m
 
   size:
-    desc: the non-test Go lines outside internal/ but internal/winapi, as wc -l counts them; fails above the ceiling of 15,612, or treesum's of 548
+    desc: the non-test Go lines outside internal/ but internal/winapi, as wc -l counts them; fails above the ceiling of 15,631, or treesum's of 548
     sources: ["**/*.go", Taskfile.yml]
     generates: [".task/pass/size-{{.GOVERSION}}"]
     cmds:
