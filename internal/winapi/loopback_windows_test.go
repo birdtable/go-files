@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"unsafe"
 
@@ -75,7 +74,8 @@ func connected(t *testing.T, server windows.Handle) bool {
 // too, as the share's server takes the client's token at the open. The loopback share keeps the
 // level asked. Through a folder's link every open is refused, and the pipe is shown to have no
 // client. A client that may write writes a byte the server reads first. Each answer is logged as
-// native, and a control must reach the pipe by one name or another for the test to see a level. A
+// native, and each way is held to whether its opens reach the pipe, so an open refused where the
+// others reach it, as one asking for delegation is, fails the test. A
 // link is made by CreateSymbolicLink itself, as os.Symlink would open its target, the pipe, to
 // choose a link's kind; making one needs the right to make links, which CI holds as an
 // administrator.
@@ -84,12 +84,6 @@ func connected(t *testing.T, server windows.Handle) bool {
 // lets that account's pipe server, over the loopback share, act as the program.
 func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testing.T) {
 	t.Parallel()
-	var reached atomic.Int32 // the controls that reached the pipe
-	t.Cleanup(func() {
-		if reached.Load() == 0 {
-			t.Errorf("no control reached the pipe over the loopback share, by its name or a link, so this test sees no level")
-		}
-	})
 	rw := uint32(windows.GENERIC_READ | windows.GENERIC_WRITE)
 	byPath := func(open func(p *uint16) (windows.Handle, error)) func(string) (windows.Handle, error) {
 		return func(path string) (windows.Handle, error) {
@@ -124,13 +118,14 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 		}, false, false, windows.SecurityIdentification},
 	}
 	ways := []struct {
-		name string
-		link bool   // whether the open is through a link to the share's name
-		kind uint32 // the link's kind
+		name    string
+		link    bool   // whether the open is through a link to the share's name
+		kind    uint32 // the link's kind
+		reaches bool   // whether every open by this way reaches the pipe, as run 46147851244 read
 	}{
-		{"the share's name", false, 0},
-		{"a file's link", true, 0},
-		{"a folder's link", true, windows.SYMBOLIC_LINK_FLAG_DIRECTORY},
+		{"the share's name", false, 0, true},
+		{"a file's link", true, 0, true},
+		{"a folder's link", true, windows.SYMBOLIC_LINK_FLAG_DIRECTORY, false},
 	}
 	for _, w := range ways {
 		for _, c := range opens {
@@ -157,8 +152,11 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 				if err != nil {
 					has := connected(t, server)
 					t.Logf("native: the open is refused (%v), and the pipe has a client: %t", err, has)
-					if has {
+					switch {
+					case has:
 						t.Errorf("a refused open left the pipe a client")
+					case w.reaches:
+						t.Errorf("the open is refused by %s, by which every open reaches the pipe", w.name)
 					}
 					return
 				}
@@ -166,8 +164,8 @@ func TestALinkToTheLoopbackPipesShareGivesItsServerIdentificationAlone(t *testin
 				if !connected(t, server) {
 					t.Fatalf("the open reached no pipe, and was not refused")
 				}
-				if c.control {
-					reached.Add(1)
+				if !w.reaches {
+					t.Errorf("the open reaches the pipe by %s, by which every open is refused", w.name)
 				}
 				if !c.writes {
 					level, err := clientLevel(server)
