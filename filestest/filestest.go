@@ -1,9 +1,10 @@
 // Package filestest writes a file, writes a program a test then starts, copies a fixture tree,
-// takes a folder a trust walk accepts, and checks a program's names against every system's rules
-// and the one list of hostile names, for a program's tests, naming no mode and no temp path, on
-// every system. Each call is the library's own call
+// takes a folder a trust walk accepts, holds a log as an Append in progress does, and checks a
+// program's names against every system's rules and the one list of hostile names, for a program's
+// tests, naming no mode and no temp path, on every system. Each call is the library's own call
 // under it, and fails the test, saying the path, when that call fails; none skips.
-// It imports the standard library, write, appdirs, confine and trust, and no package of the module imports it but its tests.
+// It imports the standard library, write, appdirs, confine, trust and internal/loghold, Append's
+// hold, and no package of the module imports it but its tests.
 package filestest
 
 import (

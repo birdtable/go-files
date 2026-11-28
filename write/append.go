@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
+
+	"github.com/birdtable/go-files/internal/loghold"
 )
 
 // LogOption is one way a log Append keeps differs from the plain one, which is made 0600, and
@@ -92,37 +93,21 @@ func appendWith(ctx context.Context, root *os.Root, name string, line []byte, li
 
 // appendOnce writes line, or moves the log aside, and answers whether to go again.
 func appendOnce(ctx context.Context, root *os.Root, name string, line []byte, limit int64, o options) (again bool, err error) {
-	f, err := openLog(root, name, o)
-	if errors.Is(err, errMoved) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-	if err := hold(ctx, f, name); err != nil {
-		return false, err
-	}
-	defer func() { err = errors.Join(err, letGo(f)) }()
-	o.reached("held")
-	mine, err := f.Stat()
-	if err != nil {
-		return false, err
-	}
-	if err := told(name, f, o); err != nil {
-		return false, err // a volume that gives no file index cannot tell the held log from another
-	}
-	at, err := root.Lstat(name)
-	if err != nil || !os.SameFile(mine, at) {
+	f, mine, at, err := loghold.Take(ctx, root, name, logHow(root, name, o))
+	if errors.Is(err, loghold.ErrMoved) {
 		return true, nil // moved by another writer before this one held it
 	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { err = errors.Join(err, loghold.Release(f)) }()
 	unpin, err := pin(root, name, mine)
 	if unpin == nil || err != nil {
 		return err == nil, err // no unpin and no error: moved since the match, or not the held log
 	}
 	defer func() { err = errors.Join(err, unpin()) }()
 	o.reached("checked")
-	if err := opened(f, name, at); err != nil { // counted by the look that matched: a link the open followed, swapped for a hard link
+	if err := loghold.Opened(f, name, at); err != nil { // counted by the look that matched: a link the open followed, swapped for a hard link
 		return false, err
 	}
 	torn, err := tornAt(f, mine.Size())
@@ -167,9 +152,6 @@ func ends(torn bool) int64 {
 	return 0
 }
 
-// errMoved is another writer's move, removal or making of the log between the look and the open.
-var errMoved = errors.New("the log was moved between its look and its open")
-
 // logOptions refuses what Append's options cannot do, before anything is opened: no name aside,
 // Shared, which is File's, a mode where a file has none, a mode its owner cannot read and write the log by, and a log moved
 // aside over itself by a name that cleans to its own. A spelling the volume alone reads as the
@@ -195,76 +177,23 @@ func logOptions(name string, o options) error {
 	return nil
 }
 
-// openLog opens the log to append, a plain file by the look and by opened on the descriptor, or
-// makes it by an exclusive create, which follows no link put there since, and gives it o's perm
-// on the descriptor, whatever the umask.
-func openLog(root *os.Root, name string, o options) (*os.File, error) {
-	fi, err := root.Lstat(name)
-	flag := os.O_RDWR | os.O_APPEND | noWait // read too: LockFileEx takes no handle that may only append
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		fi = nil
-	case err != nil:
-		return nil, err
-	case !fi.Mode().IsRegular():
-		return nil, fmt.Errorf("%s is %v, not a plain file, and no line is written to it", name, fi.Mode().Type())
-	}
-	o.reached("look")
-	var f *os.File
-	if fi == nil {
-		f, err = newFile(root, name, flag, o)
-	} else {
-		f, err = root.OpenFile(name, flag, 0)
-	}
-	switch {
-	case fi == nil && errors.Is(err, fs.ErrExist), fi != nil && errors.Is(err, fs.ErrNotExist):
-		return nil, errMoved
-	case err != nil:
-		return nil, err
-	case fi == nil:
-		if err := mode(f, o.perm); err != nil {
-			return nil, errors.Join(err, f.Close())
-		}
-		return f, nil
-	}
-	got, err := f.Stat()
-	if err == nil {
-		err = opened(f, name, got)
-	}
-	if err != nil {
-		return nil, errors.Join(err, f.Close())
-	}
-	return f, nil
-}
-
-// opened refuses a log that is not plain, or has a second name, which can be a file outside root.
-// A file put at the name since the look is appendOnce's to find, by its check at the hold.
-func opened(f *os.File, name string, got fs.FileInfo) error {
-	if !got.Mode().IsRegular() {
-		return fmt.Errorf("%s changed between its look and its open to %v, not a plain file, and no line was written to it", name, got.Mode().Type())
-	}
-	n, err := names(f, got)
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return fmt.Errorf("%s has %d names, and a second name can be a file outside the root, so no line is written to it", name, n)
-	}
-	return nil
-}
-
-// hold takes the log, waiting for another process to let go of it until ctx ends. It always tries
-// once, and a ctx that ends while it waits is answered at once, not at the next try.
-func hold(ctx context.Context, f *os.File, name string) error {
-	for wait := time.Millisecond; ; wait = min(2*wait, 20*time.Millisecond) {
-		got, err := tryHold(f)
-		if err != nil || got {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("%s is held by another process, and no line was written to it: %w", name, ctx.Err())
-		case <-time.After(wait):
-		}
+// logHow is what Append brings to loghold.Take for the log at name beneath root: its create, which
+// makes the log by an exclusive create and gives it o's perm on the descriptor, whatever the umask;
+// fileid's test seam; and its test steps "look" and "held".
+func logHow(root *os.Root, name string, o options) loghold.How {
+	return loghold.How{
+		Create: func(flag int) (*os.File, error) {
+			f, err := newFile(root, name, flag, o)
+			if err != nil {
+				return nil, err
+			}
+			if err := mode(f, o.perm); err != nil {
+				return nil, errors.Join(err, f.Close())
+			}
+			return f, nil
+		},
+		ForceNoIndex: o.forceNoIndex(),
+		Look:         func() { o.reached("look") },
+		Held:         func() { o.reached("held") },
 	}
 }

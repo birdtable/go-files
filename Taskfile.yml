@@ -273,6 +273,9 @@ tasks:
           trust/trusttest/p_test.go trusttest $mod/lib layer-trusttest-tests
           filestest/p.go filestest $kit layer-filestest
           filestest/p_test.go filestest $mod/lib layer-filestest-tests
+          internal/loghold/p.go loghold $kit layer-loghold
+          internal/loghold/p_windows.go loghold $kit layer-loghold-windows
+          internal/loghold/p_test.go loghold $mod/lib layer-loghold-tests
           internal/fileid/p.go fileid $kit layer-internal
           internal/fileid/p_test.go fileid $mod/lib layer-internal
           internal/cmd/measure/p.go measure $kit layer-internal
