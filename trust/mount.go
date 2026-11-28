@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/birdtable/go-files/internal/procfs"
 )
 
 // unnamed is the mounter of a FUSE file system whose mounter is not told: an account trust never
@@ -70,8 +68,8 @@ func ofInitialNS(who string, own, mount nsFile) string {
 
 // errNotProc is a file read under /proc that is not held to this process's procfs: an owner of this
 // mount namespace may mount over /proc, or bind or link another file of a procfs at mountinfo,
-// and serve what it likes. It is internal/procfs's, which confine's Final shares.
-var errNotProc = procfs.ErrNotProc
+// and serve what it likes.
+var errNotProc = errors.New("is not held to procfs's own file, so what it holds is not the kernel's")
 
 // mounterOf is n, a name on a FUSE file system of the device dev, with its mounter and the folder
 // it is mounted on, from b, Linux's /proc/self/mountinfo as read with err, before ofInitialNS. A
