@@ -30,7 +30,7 @@ const reparseAFUnix = 0x80000023
 // is and act as it in nothing. The system reads the first as FILE_FLAG_OPEN_NO_RECALL too, which
 // changes no read of trust's: a file in remote storage is a reparse point, which trust takes for a
 // link (rule 5) and never reads.
-const identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IDENTIFICATION
+const identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IMPERSONATION
 
 // createFile is windows.CreateFile with identify added to flags, trust's one CreateFile.
 func createFile(name *uint16, access, share, disposition, flags uint32, template windows.Handle) (windows.Handle, error) {

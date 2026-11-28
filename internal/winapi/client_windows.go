@@ -20,7 +20,7 @@ import (
 // FILE_FLAG_OPEN_NO_RECALL too, the two being one bit, so an open with it leaves a file's data in
 // remote storage, which no open of go-files' attributes or of a file trust reads asks to recall.
 // trust and trust/trusttest, which may not import this package, pass the same pair by hand.
-const Identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IDENTIFICATION
+const Identify = windows.SECURITY_SQOS_PRESENT | windows.SECURITY_IMPERSONATION
 
 // CreateFile is windows.CreateFile with Identify added to flags, no security attributes and no
 // template, the one CreateFile confine and appdirs call.
@@ -33,7 +33,7 @@ func CreateFile(name *uint16, access, share, disposition, flags uint32) (windows
 func identifyOnly() *windows.SECURITY_QUALITY_OF_SERVICE {
 	return &windows.SECURITY_QUALITY_OF_SERVICE{
 		Length:              uint32(unsafe.Sizeof(windows.SECURITY_QUALITY_OF_SERVICE{})),
-		ImpersonationLevel:  windows.SecurityIdentification,
+		ImpersonationLevel:  windows.SecurityImpersonation,
 		ContextTrackingMode: windows.SECURITY_STATIC_TRACKING,
 	}
 }
