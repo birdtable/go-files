@@ -92,6 +92,22 @@ func OpenPath(path string, follow bool) (*os.File, error) {
 	return os.NewFile(uintptr(h), path), nil
 }
 
+// OpenFolder is os.Open of a folder by CreateFile with Identify, the Open a make by path is given:
+// path opened to read, sharing read, write and delete, every link on the way and at its last name
+// followed, as os.Open opens a folder, so the open lets no pipe's server reached on the way act
+// as the caller. An error is an *fs.PathError.
+func OpenFolder(path string) (*os.File, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+	}
+	h, err := CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 // Stat is os.Stat by OpenPath: the answer is read from a handle opened through path's last link, as
 // os.Stat reads it, and is one os.SameFile compares, its volume and index read on the handle. It
 // never asks GetFileAttributesEx, whose open of the name passes no quality of service.

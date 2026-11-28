@@ -72,6 +72,9 @@ func Append(ctx context.Context, root *os.Root, name string, line []byte, limit 
 // Its options' perm is the mode of a log it makes, and aside the name a full log moves to, which
 // "" leaves unnamed and refused.
 func appendWith(ctx context.Context, root *os.Root, name string, line []byte, limit int64, o options) error {
+	if err := rootOnPipes(root, name); err != nil {
+		return fmt.Errorf("%s beneath %s: %w", name, root.Name(), err)
+	}
 	if err := logNamed(name); err != nil {
 		return fmt.Errorf("%s beneath %s: %w", name, root.Name(), err)
 	}

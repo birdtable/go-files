@@ -10,7 +10,7 @@ import (
 // 5,875, moved by each later change by exactly the lines it was measured to add or remove, and by
 // nothing else, with no headroom. A change that adds or removes lines moves it in the same commit,
 // which says what the lines are.
-const Ceiling = 15202
+const Ceiling = 15423
 
 // Apart is the package counted on its own, under ApartCeiling, and left out of Ceiling's count.
 const (

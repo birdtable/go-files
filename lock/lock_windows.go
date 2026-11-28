@@ -50,7 +50,7 @@ func owned(*os.File, os.FileInfo, bool) error { return nil }
 // with ErrNoAccessList, and a last name ending in a dot or a space with winapi.ErrStrippedName,
 // matching fs.ErrInvalid; listless takes every volume as one (acquire).
 func newLock(at in, path string, listless bool) (*os.File, error) {
-	open := os.Open
+	open := winapi.OpenFolder
 	if at.root != nil {
 		open = at.root.Open
 	}
@@ -73,11 +73,12 @@ func indexAt(f *os.File, name string) error {
 }
 
 // open opens name as flag says, to read or to read and write, sharing read and write as os does,
-// with a link at its last element opened as itself, which unlinked then refuses: by path, or below
-// at's root in name's folder, opened through the root.
+// with a link at its last element opened as itself, which unlinked then refuses: by path, by
+// winapi.CreateFile, which asks for identification alone, or below at's root in name's folder,
+// opened through the root, by winapi.OpenAt.
 func (at in) open(name string, flag int, _ fs.FileMode) (*os.File, error) {
 	if at.root == nil {
-		return os.OpenFile(name, flag|noFollow, 0) //nolint:gosec // the caller's lock or note path, a link opened as itself
+		return openPath(name, flag)
 	}
 	d, err := at.root.Open(filepath.Dir(name))
 	if err != nil {
@@ -92,6 +93,68 @@ func (at in) open(name string, flag int, _ fs.FileMode) (*os.File, error) {
 		Share: windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE, Disposition: windows.FILE_OPEN, Attributes: windows.OBJ_CASE_INSENSITIVE})
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: winapi.Dos(err)}
+	}
+	return os.NewFile(uintptr(h), name), nil
+}
+
+// rootOnPipes refuses root, before any open beneath it, where its folder is a host's pipes
+// (winapi.RootOnPipes): TakeIn, WaitIn and HolderIn ask it first.
+func rootOnPipes(root *os.Root, name string) error { return winapi.RootOnPipes(root, name) }
+
+// pathOnPipes refuses each of names but "", before any open of it, where it names a device or a
+// pipe (fileid.DevicePath) or is on a host's pipes share (winapi.PipesShare), and where its folder,
+// opened by winapi.OpenFolder, is a host's pipes (winapi.OnPipes): Take, Wait and Holder ask it
+// first, so each look and open of a name that follows, os.Remove, os.Rename and os.CreateTemp among
+// them, is in a folder on a disk, while no other process changes the folders above it. A folder that
+// does not open is that open's error. A refusal is an *fs.PathError, op "open", matching
+// fs.ErrInvalid.
+func pathOnPipes(names ...string) error {
+	for _, name := range names {
+		if name != "" {
+			if err := folderOnPipes(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// folderOnPipes is pathOnPipes of one name.
+func folderOnPipes(name string) (err error) {
+	if fileid.DevicePath(name) || winapi.PipesShare(name) {
+		return &fs.PathError{Op: "open", Path: name, Err: fmt.Errorf("the path names a device or a pipe, or a host's pipes share, and nothing was opened: %w", fs.ErrInvalid)}
+	}
+	d, err := winapi.OpenFolder(filepath.Dir(name))
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, d.Close()) }()
+	return winapi.OnPipes(d, name)
+}
+
+// lstatPath is os.Lstat of the caller's lock or note path by winapi.Lstat, whose open asks for
+// identification alone; it follows no link.
+func lstatPath(name string) (fs.FileInfo, error) { return winapi.Lstat(name) }
+
+// statPath is os.Stat of a folder of the caller's lock or note path by winapi.Stat, whose open
+// asks for identification alone.
+func statPath(name string) (fs.FileInfo, error) { return winapi.Stat(name) }
+
+// openPath is os.OpenFile of the caller's lock or note path by winapi.CreateFile: to read, or to
+// read and write for os.O_RDWR, sharing read and write as os does, a folder opened to read alone,
+// and a link at the last name opened as itself (noFollow). An error is an *fs.PathError.
+func openPath(name string, flag int) (*os.File, error) {
+	p, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	}
+	access, flags := uint32(windows.GENERIC_READ), uint32(windows.FILE_FLAG_BACKUP_SEMANTICS|noFollow)
+	if flag&os.O_RDWR != 0 {
+		access, flags = access|windows.GENERIC_WRITE, noFollow
+	}
+	h, err := winapi.CreateFile(p, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.OPEN_EXISTING, flags)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
 	return os.NewFile(uintptr(h), name), nil
 }

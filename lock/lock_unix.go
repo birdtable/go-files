@@ -91,3 +91,18 @@ func (at in) open(name string, flag int, perm fs.FileMode) (*os.File, error) {
 // indexAt refuses nothing off Windows: every Unix volume gives a file an inode os.SameFile can trust,
 // so a lock-file compare by file ID is never on a volume with none.
 func indexAt(*os.File, string) error { return nil }
+
+// rootOnPipes refuses nothing: only Windows has a pipes' device a root can be opened on.
+func rootOnPipes(*os.Root, string) error { return nil }
+
+// pathOnPipes refuses nothing: off Windows no path names a pipe by its spelling, and a pipe at a
+// name is refused by its open (openLock).
+func pathOnPipes(...string) error { return nil }
+
+// lstatPath is os.Lstat of the caller's lock or note path; it follows no link.
+func lstatPath(name string) (fs.FileInfo, error) {
+	return os.Lstat(name) //nolint:gosec // the caller's lock or note path; an Lstat follows no link
+}
+
+// statPath is os.Stat of a folder of the caller's lock or note path.
+func statPath(name string) (fs.FileInfo, error) { return os.Stat(name) }

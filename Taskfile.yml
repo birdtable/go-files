@@ -302,8 +302,8 @@ tasks:
           if [ -f "$work/bad" ]; then cat "$work/report" >&2; exit 1; fi
           exit 0
         timeout: 10m
-      # The pipe-by-path row is held by plants too. A scratch module has files of confine, appdirs
-      # and trust that Windows builds, with no suffix or with one Go reads no system in (_unix,
+      # The pipe-by-path row is held by plants too. A scratch module has files of confine, appdirs,
+      # trust, lock and write that Windows builds, with no suffix or with one Go reads no system in (_unix,
       # _passwd, _other), each calling os.ReadFile, and forbidigo's report for windows must name
       # each with the row. An exclusion by such a suffix, or the row dropped, leaves a plant
       # unreported, and this is red.
@@ -319,6 +319,10 @@ tasks:
           appdirs/p_passwd.go appdirs Passwd
           trust/p_unix.go trust Unix
           trust/p_other.go trust Other
+          lock/p.go lock Plain
+          lock/p_unix.go lock Unix
+          write/p.go write Plain
+          write/p_unix.go write Unix
           "
           echo "$plants" | while read -r f pkg fn; do
             [ -n "$f" ] || continue

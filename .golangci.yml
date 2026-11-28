@@ -474,7 +474,8 @@ linters:
         # a junction on the way, lets the pipe's server act as the caller.
         # confine, appdirs and trust look at a name by internal/winapi (trust
         # by its own createFile) wherever no judgement has refused a folder
-        # another account may change. A file built off Windows alone, and the
+        # another account may change; lock and write refuse a pipe path, and a
+        # folder on pipes, before Go's open. A file built off Windows alone, and the
         # tests, are excluded below; a look made after trust's judgement
         # carries a nolint that says so.
         - pattern: ^os\.(Stat|Lstat|Readlink|Open|OpenFile|OpenRoot|OpenInRoot|Create|CreateTemp|WriteFile|ReadFile|ReadDir|Mkdir|MkdirAll|MkdirTemp|Remove|RemoveAll|Rename|Truncate|Chmod|Chown|Lchown|Chtimes|Link|Symlink|Chdir|DirFS|CopyFS)$
@@ -698,18 +699,18 @@ linters:
         linters: [forbidigo]
         text: "register \\(pipe-client\\):"
         source: '^\tif err := windows\.NtCreateFile\(&h, windows\.READ_CONTROL\|windows\.WRITE_DAC, &attrs, '
-      # The pipe-by-path row holds in confine, appdirs and trust (not
-      # trusttest), in a file Windows builds, outside the tests. A file whose
-      # name Go reads as a system that is not Windows (_linux, _darwin,
+      # The pipe-by-path row holds in confine, appdirs, trust (not trusttest),
+      # lock and write, in a file Windows builds, outside the tests. A file
+      # whose name Go reads as a system that is not Windows (_linux, _darwin,
       # _freebsd, _netbsd) is excluded by pattern. A _unix, _passwd or _other
       # file is excluded only by its exact name below, as Go reads no system
       # in those suffixes: each one's build line leaves Windows out, and any
       # other such file, which Windows may build, is held to the row. The lint
       # task's plants show a Windows-built _unix, _passwd and _other file red.
-      - path-except: ^(confine|appdirs|trust)/[^/]+\.go$
+      - path-except: ^(confine|appdirs|trust|lock|write)/[^/]+\.go$
         linters: [forbidigo]
         text: "register \\(pipe-by-path\\):"
-      - path: _test\.go$|_(linux|darwin|freebsd|netbsd)\.go$|^(appdirs/(account|free|here|temp)_unix|appdirs/account_passwd|confine/(open|rename|runnable|shared)_unix|trust/(device|trust)_unix)\.go$|^(appdirs/(free|index|sysstat|volume)|confine/(folds|index|link|rename|resolve|sysstat)|trust/(aclmask|interpreters|maclist|mount|proc))_other\.go$
+      - path: _test\.go$|_(linux|darwin|freebsd|netbsd)\.go$|^(appdirs/(account|free|here|temp)_unix|appdirs/account_passwd|confine/(open|rename|runnable|shared)_unix|trust/(device|trust)_unix|lock/(flock|lock_unix)|write/write_unix)\.go$|^(appdirs/(free|index|sysstat|volume)|confine/(folds|index|link|rename|resolve|sysstat)|trust/(aclmask|interpreters|maclist|mount|proc))_other\.go$
         linters: [forbidigo]
         text: "register \\(pipe-by-path\\):"
       # The no-raw-call row holds outside the one darwin

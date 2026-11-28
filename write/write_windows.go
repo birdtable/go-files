@@ -553,3 +553,12 @@ func (s sysOptions) link(root *os.Root, tmp, name string, g *grip) error {
 	}
 	return errors.Join(err, d.Close())
 }
+
+// rootOnPipes refuses root, before any open beneath it, where its folder is a host's pipes
+// (winapi.RootOnPipes): each call of write that takes a root asks it first, and openFolder of each
+// root it opens by a path.
+func rootOnPipes(root *os.Root, name string) error { return winapi.RootOnPipes(root, name) }
+
+// pipesPath reports whether p names a device or a pipe (fileid.DevicePath) or is on a host's
+// pipes share (winapi.PipesShare), which openFolder refuses before any open.
+func pipesPath(p string) bool { return fileid.DevicePath(p) || winapi.PipesShare(p) }

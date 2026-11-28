@@ -74,57 +74,14 @@ func TestARootOnAShareOfThisMachinesOwnDiskIsNotRefused(t *testing.T) {
 	}
 }
 
-// onPipesShare reads a path as on a host's pipes share where its share is IPC$ or pipe, in any case,
-// for any host, in each spelling of a UNC path and in a final path under \Device\Mup\, a
-// redirector's own components passed over; and a path on any other share, a share whose name only
-// looks like one, IPC$ or pipe below another share, and a path on a disk, as on none.
-//
-// What it costs when this fails: a root on a host's pipes share passes rootOnPipes, and a name
-// beneath it opens that host's pipe with no quality of service, so the pipe's server may act as the
-// program; or, the other way, a root on a share of files is refused as if it were pipes.
-func TestAPathIsOnAHostsPipesShareOnlyWhereItsShareIsIPCOrPipe(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		path string
-		want bool
-	}{
-		{`\Device\Mup\localhost\IPC$`, true},
-		{`\Device\Mup\127.0.0.1\pipe\x`, true},
-		{`\DEVICE\MUP\Host.Example.COM\ipc$\`, true},
-		{`\Device\Mup\;LanmanRedirector\;Z:0000000000012345\h\IPC$\x`, true},
-		{`\\HOST.example\Ipc$`, true},
-		{`\\localhost\pipe\`, true},
-		{`\\[::1]\IPC$\`, true},
-		{`\\?\UNC\h\PIPE\`, true},
-		{`\\.\UNC\h\ipc$`, true},
-		{`\??\UNC\h\pipe\x`, true},
-		{`//h/ipc$/`, true},
-		{`\\.\pipe\`, true},
-		{`\Device\Mup\localhost\C$\x`, false},
-		{`\Device\Mup\;LanmanRedirector\;Z:0000000000012345\h\data`, false},
-		{`\\h\pipes\`, false},
-		{`\\h\ipc\`, false},
-		{`\\h\share\IPC$`, false},
-		{`\\h\share\pipe\x`, false},
-		{`\\h`, false},
-		{`\\?\C:\IPC$`, false},
-		{`\\.\C:\pipe`, false},
-		{`C:\pipe\x`, false},
-		{`\Device\HarddiskVolume3\pipe`, false},
-		{``, false},
-	} {
-		if got := onPipesShare(c.path); got != c.want {
-			t.Errorf("onPipesShare(%q): %t, and want %t", c.path, got, c.want)
-		}
-	}
-}
-
-// A root opened on a host's pipes share, IPC$ or pipe, by its UNC name in any spelling or through a
-// folder link to it, holds that host's pipes as names beneath it. Each confine call that opens a name
-// beneath a caller's root, rootCalls' list, refuses such a root, matching fs.ErrInvalid, from the
-// root's own name or the final path read from its handle, and the pipe whose name each was given
-// sees no client. Where the system opens no root on the share, or makes no link, that is logged as
-// its own answer, and onPipesShare's table is the refusal's proof.
+// A root opened on a host's pipes share, IPC$ or pipe, by its UNC name in any spelling, by a
+// \\?\GLOBALROOT\Device\Mup\ name, by a spelling the system may fold to the share's name (a doubled
+// separator, a trailing dot), or through a folder link to it, holds that host's pipes as names
+// beneath it. Each confine call that opens a name beneath a caller's root, rootCalls' list, refuses
+// such a root, matching fs.ErrInvalid, and the pipe whose name each was given sees no client. Where
+// the system opens no root on the share, or makes no link, that is logged as its own answer, and
+// internal/winapi's table of the share rule, and its test of the handle check on each of these
+// folders, are the refusal's proof.
 //
 // What it costs when this fails: a root a program is given as \\host\IPC$, or one a link leads
 // there, has confine open a name beneath it as that host's pipe, with no quality of service, so the
@@ -133,10 +90,12 @@ func TestARootOnAHostsPipesShareIsRefusedBeforeAnyOpenBeneathIt(t *testing.T) {
 	t.Parallel()
 	disk := diskRoot(t)
 	link := filepath.Join(t.TempDir(), "ipc")
-	paths := []string{`\\localhost\IPC$\`, `\\127.0.0.1\pipe\`, `\\?\UNC\localhost\IPC$\`, link}
+	paths := []string{`\\localhost\IPC$\`, `\\127.0.0.1\pipe\`, `\\?\UNC\localhost\IPC$\`,
+		`\\?\GLOBALROOT\Device\Mup\localhost\IPC$\`, `\\?\GLOBALROOT\Device\Mup\127.0.0.1\pipe\`,
+		`\\localhost\\IPC$\`, `\\localhost\IPC$.\`, link}
 	if err := os.Symlink(`\\localhost\IPC$\`, link); err != nil {
 		t.Logf("native: a folder link %s to \\\\localhost\\IPC$\\: %v", link, err)
-		paths = paths[:3]
+		paths = paths[:len(paths)-1]
 	}
 	for _, path := range paths {
 		root, err := os.OpenRoot(path)

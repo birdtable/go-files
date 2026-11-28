@@ -92,6 +92,18 @@ A write, a `Swap` and an `Append` each check that the file they put in place, ho
 
 `go doc github.com/birdtable/go-files/write` has the rest; every exported name is documented.
 
+## Pipes on Windows
+
+A path or a root that leads to a host's named pipes would have write's open, which passes no
+quality of service, reach a pipe, whose server could act as the program. On Windows each call
+refuses one before any open beneath it, matching `fs.ErrInvalid`.
+
+| guard | test |
+| --- | --- |
+| `File`, `FileFrom`, `Keep` (its copy and its source), `PutBack` (the file and the copy, not as `ErrChanged`) and `Swap`: a path, or its folder, that names a device or a pipe (`\\.\`, or `\\?\` or `\??\` naming neither a drive nor a `Volume{GUID}`) or is on a host's pipes share (`IPC$` or `pipe`, in any UNC spelling or a `\\?\GLOBALROOT\Device\Mup\` name), refused before any open; the folder's root, where a link leads it to a host's pipes, refused by its own handle before any open beneath it; the pipe named seeing no client | `TestEachCallByPathRefusesAPipesFolderAndThePipeSeesNoClient` |
+| `FileIn`, `Append`, `LogWriter`'s `Write`, `KeepIn` and `PutBackIn` (both roots) and `SyncFolder`: a root on the pipes' device or on a host's pipes share, as confine refuses one, refused before any open beneath it; the pipe named seeing no client | `TestEachCallByRootRefusesARootOnAHostsPipesAndThePipeSeesNoClient` (native: where the system opens no root on a folder, logged) |
+| no `os` call by name in a file of write that Windows builds, but the `os.OpenRoot` of a path's folder, after the name check and before the root's own check, with a nolint that says so | the lint's pipe-by-path row; the lint task's plants, Windows-built `write/p.go` and `write/p_unix.go` each calling `os.ReadFile`, named by the row |
+
 ## Libraries looked at
 
 The standard library and `golang.org/x` first.

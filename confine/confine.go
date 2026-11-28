@@ -18,6 +18,11 @@
 // it in nothing. A UNC path (\\host\share\...) is not refused: a share is a place for files, and an
 // open of one connects to the named host and authenticates the caller to it. A program that takes
 // paths from another account refuses UNC paths itself, where filepath.VolumeName starts with \\.
+// A root on a host's pipes share, IPC$ or pipe, in any spelling, is refused before any open
+// beneath it. A root on any other share is trusted only as far as every account that may change a
+// folder above it on the server: a junction there is followed on the server, where no check here
+// sees it, so a program that takes a root on a share another account writes refuses UNC roots
+// itself.
 //
 // Built on os.Root, and golang.org/x/sys for openat2 on Linux and the Windows calls. It adds no
 // link followed at any component, renames that never replace or that swap, folders made by handle
