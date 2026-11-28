@@ -201,7 +201,16 @@ func TestOnMacOSANestedImageComesOffBeforeTheOneItIsAttachedBeneath(t *testing.T
 	t.Parallel()
 	d := finalTemp(t)
 	outer, inner := filepath.Join(d, "hfs.dmg"), filepath.Join(d, "apfs.dmg")
+	// The parent's cleanup runs once its parallel subtest has ended, and its cleanups with it.
+	t.Cleanup(func() {
+		for _, img := range []string{inner, outer} {
+			if disk, err := imageDisk(img); disk != "" || err != nil {
+				t.Errorf("after the test that attached it ended, %s is still attached as %q (%v), and want no image attached", img, disk, err)
+			}
+		}
+	})
 	t.Run("nested", func(t *testing.T) {
+		t.Parallel()
 		mnt := filepath.Join(d, "hfs")
 		volume(t, "JHFS+", "hfs", outer, mnt)
 		volume(t, "APFS", "apfs", inner, filepath.Join(mnt, "m"))
@@ -211,11 +220,6 @@ func TestOnMacOSANestedImageComesOffBeforeTheOneItIsAttachedBeneath(t *testing.T
 			t.Errorf("no way took the image off, and the test failed with %q, and want one failure that it is still attached", stuck.errs)
 		}
 	})
-	for _, img := range []string{inner, outer} {
-		if disk, err := imageDisk(img); disk != "" || err != nil {
-			t.Errorf("after the test that attached it ended, %s is still attached as %q (%v), and want no image attached", img, disk, err)
-		}
-	}
 }
 
 // hfsLinked attaches a journaled HFS+ image on d/hfs (HFS+ gives a folder a second name only where
